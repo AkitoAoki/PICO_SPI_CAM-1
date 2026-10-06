@@ -8,168 +8,209 @@
 
 ArduCAM::ArduCAM()
 {
+  // 既定値としてOV7670を選択し、通常のI2Cアドレス0x42を設定する。
   sensor_model = OV7670;
   sensor_addr = 0x42;
 }
+
 ArduCAM::ArduCAM(byte model ,int CS)
 {
-	B_CS = CS;
-	*P_CS=CS;
+    // 受け取ったセンサモデルとCSピンを保持し、対象センサを選択可能にする。
+    B_CS = CS;
+    *P_CS=CS;
+  // SPI通信の前にCSをHIGHにして、未選択状態にしておく。
   sbi(P_CS, B_CS);
-	sensor_model = model;
-	switch (sensor_model)
-	{
+
+    // センサモデルに応じて、I2Cスレーブアドレスを切り替える。
+    sensor_model = model;
+    switch (sensor_model)
+    {
     case OV2640:
-      	sensor_addr = 0x30;
+      // OV2640は0x30アドレスを使用する。
+          sensor_addr = 0x30;
     break;
      case OV5642:
-      	sensor_addr = 0x3C;
+      // OV5642は0x3Cアドレスを使用する。
+          sensor_addr = 0x3C;
     break;
-		default:
-		  sensor_addr = 0x60;
-		break;
-	}	
+        default:
+          // それ以外は既定の0x60で動作させる。
+          sensor_addr = 0x60;
+        break;
+    }	
 }
 
 void ArduCAM::InitCAM()
 {
- 
+  // センサ種別に応じて初期化レジスタを順に書き込む。
   switch (sensor_model)
   {
     case OV2640:
-        wrSensorReg8_8(0xff, 0x01);
-        wrSensorReg8_8(0x12, 0x80);
+        // OV2640の初期化シーケンスを開始する。
+        wrSensorReg8_8(0xff, 0x01); // 0xff: バンク選択、0x01: 撮像素子制御用Sensorバンク
+        // 画像取得を止めて初期設定モードへ切り替える。
+        wrSensorReg8_8(0x12, 0x80); // 0x12: COM7（動作モード）レジスタ、0x80: ソフトウェアリセットを実行
+        // センサが安定するまで待つ。
         sleep_ms(100);
         if (m_fmt == JPEG)
         {
+          // JPEG出力時はJPEG用の初期設定テーブルを順に適用する。
           wrSensorRegs8_8(OV2640_JPEG_INIT);
           wrSensorRegs8_8(OV2640_YUV422);
           wrSensorRegs8_8(OV2640_JPEG);
-          wrSensorReg8_8(0xff, 0x01);
-          wrSensorReg8_8(0x15, 0x00);
+          wrSensorReg8_8(0xff, 0x01); // 0xff: バンク選択、0x01: 撮像素子制御用Sensorバンク
+          wrSensorReg8_8(0x15, 0x00); // 0x15: COM10（同期信号出力制御）レジスタ、0x00: 信号反転などの制御ビットを解除
           wrSensorRegs8_8(OV2640_320x240_JPEG);
         }
         else
         {
+          // JPEG以外ではQVGA相当の設定を入れる。
           wrSensorRegs8_8(OV2640_QVGA);
         }
         break;
-		case OV5642:
-		{
-					wrSensorReg16_8(0x3008, 0x80);
-					if (m_fmt == RAW)
-					{
-						//Init and set 640x480;
-						wrSensorRegs16_8(OV5642_1280x960_RAW);	
-						wrSensorRegs16_8(OV5642_640x480_RAW);	
-					}
-					else
-					{	
-						wrSensorRegs16_8(OV5642_QVGA_Preview);
-						sleep_ms(100);
-						if (m_fmt == JPEG)
-						{
-							sleep_ms(100);
-							wrSensorRegs16_8(OV5642_JPEG_Capture_QSXGA);
-							wrSensorRegs16_8(ov5642_320x240);
-							sleep_ms(100);
-							wrSensorReg16_8(0x3818, 0xa8);
-							wrSensorReg16_8(0x3621, 0x10);
-							wrSensorReg16_8(0x3801, 0xb0);
-							wrSensorReg16_8(0x4407, 0x04);
-						}
-						else
-						{
-							byte reg_val;
-							wrSensorReg16_8(0x4740, 0x21);
-							wrSensorReg16_8(0x501e, 0x2a);
-							wrSensorReg16_8(0x5002, 0xf8);
-							wrSensorReg16_8(0x501f, 0x01);
-							wrSensorReg16_8(0x4300, 0x61);
-							rdSensorReg16_8(0x3818, &reg_val);
-							wrSensorReg16_8(0x3818, (reg_val | 0x60) & 0xff);
-							rdSensorReg16_8(0x3621, &reg_val);
-							wrSensorReg16_8(0x3621, reg_val & 0xdf);
-						}
-					}
+        case OV5642:
+        {
+                    // OV5642は16bitレジスタアドレスを持つため、上位/下位アドレスを分けて書く。
+                    wrSensorReg16_8(0x3008, 0x80);
+                    if (m_fmt == RAW)
+                    {
+                        // RAW出力時は大きめの解像度で初期化した後、640x480に固定する。
+                        wrSensorRegs16_8(OV5642_1280x960_RAW);	
+                        wrSensorRegs16_8(OV5642_640x480_RAW);	
+                    }
+                    else
+                    {	
+                        // プレビュー用の640x480相当の設定を行う。
+                        wrSensorRegs16_8(OV5642_QVGA_Preview);
+                        sleep_ms(100);
+                        if (m_fmt == JPEG)
+                        {
+                            // JPEG取得時はキャプチャ解像度の設定値を追加で適用する。
+                            sleep_ms(100);
+                            wrSensorRegs16_8(OV5642_JPEG_Capture_QSXGA);
+                            wrSensorRegs16_8(ov5642_320x240);
+                            sleep_ms(100);
+                            wrSensorReg16_8(0x3818, 0xa8);
+                            wrSensorReg16_8(0x3621, 0x10);
+                            wrSensorReg16_8(0x3801, 0xb0);
+                            wrSensorReg16_8(0x4407, 0x04);
+                        }
+                        else
+                        {
+                            // RAW/BMPのような非圧縮画像では別のレジスタ設定を行う。
+                            byte reg_val;
+                            wrSensorReg16_8(0x4740, 0x21);
+                            wrSensorReg16_8(0x501e, 0x2a);
+                            wrSensorReg16_8(0x5002, 0xf8);
+                            wrSensorReg16_8(0x501f, 0x01);
+                            wrSensorReg16_8(0x4300, 0x61);
+                            rdSensorReg16_8(0x3818, &reg_val);
+                            wrSensorReg16_8(0x3818, (reg_val | 0x60) & 0xff);
+                            rdSensorReg16_8(0x3621, &reg_val);
+                            wrSensorReg16_8(0x3621, reg_val & 0xdf);
+                        }
+                    }
         break;
-		}
+        }
     default:
+      // 対応していないセンサでは何もしない。
       break;
   }
 }
 
 void ArduCAM::CS_HIGH(void)
 {
-	 sbi(P_CS, B_CS);	
+     // SPI通信を終了するため、CSをHIGHにする。
+     sbi(P_CS, B_CS);	
 }
 void ArduCAM::CS_LOW(void)
 {
-	 cbi(P_CS, B_CS);	
+     // SPI通信を開始するため、CSをLOWにする。
+     cbi(P_CS, B_CS);	
 }
 
 void ArduCAM::flush_fifo(void)
 {
-	write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_MASK);
+    // FIFOの中身を削除して、前の画像データを残さない。
+    write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_MASK);
 }
 
 void ArduCAM::start_capture(void)
 {
-	write_reg(ARDUCHIP_FIFO, FIFO_START_MASK);
+    // 画像取得を開始する命令を送る。
+    write_reg(ARDUCHIP_FIFO, FIFO_START_MASK);
 }
 
 
 void ArduCAM::clear_fifo_flag(void )
 {
-	write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_MASK);
+    // FIFOの状態フラグをクリアして次回の取得準備をする。
+    write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_MASK);
 }
 
 
 uint8_t ArduCAM::read_fifo(void)
 {
-	uint8_t data;
-	data = bus_read(SINGLE_FIFO_READ);
-	return data;
+    // FIFOから1バイトずつ画像データを取り出す。
+    uint8_t data;
+    // バス読み取り関数を経由してデータを受け取る。
+    data = bus_read(SINGLE_FIFO_READ);
+    return data;
 }
 
 
 uint8_t ArduCAM::read_reg(uint8_t addr)
 {
+  // 指定したSPIレジスタの値を1バイト読み取る。
   uint8_t value = 0;
-	addr = addr& 0x7f;
- 	cbi(P_CS, B_CS);
-	spi_write_blocking(SPI_PORT, &addr, 1);
+    // 読み出しコマンドでは上位ビットを0にする。
+    addr = addr& 0x7f;
+     // 対象デバイスを選択して、レジスタアドレスを送信する。
+     cbi(P_CS, B_CS);
+    spi_write_blocking(SPI_PORT, &addr, 1);
+  // その後にデータを1バイト受信する。
   spi_read_blocking(SPI_PORT, 0, &value, 1);
+  // 通信終了後にCSを戻す。
   sbi(P_CS, B_CS);
-	return value;
+    return value;
 }
 
 
 
 void ArduCAM::write_reg(uint8_t addr, uint8_t data)
 {
+    // ArduCAMの内部レジスタへ1バイト書き込む。
     uint8_t buf[2];
+    // 書き込みモードにするため、READビットを外したアドレスを作る。
     buf[0] = addr|WRITE_BIT ;  // remove read bit as this is a write
+    // 実際に書き込む値を設定する。
     buf[1] = data;
+    // CSをLOWにしてSPI転送を有効化する。
     cbi(P_CS, B_CS);
     spi_write_blocking(SPI_PORT, buf, 2);
+    // 処理が完了したらCSを元に戻す。
     sbi(P_CS, B_CS);
+    // 次のレジスタアクセスまで短い待ち時間を置く。
     sleep_ms(1); 
 }
 
 
 uint32_t ArduCAM::read_fifo_length(void)
 {
-	uint32_t len1,len2,len3,length=0;
-	len1 = read_reg(FIFO_SIZE1);
+    // FIFOに蓄積されているデータ長を取得する。
+    uint32_t len1,len2,len3,length=0;
+    // 各サイズレジスタから下位3バイトを読み出す。
+    len1 = read_reg(FIFO_SIZE1);
   len2 = read_reg(FIFO_SIZE2);
   len3 = read_reg(FIFO_SIZE3) & 0x7f;
+  // 3バイトを結合して総データ長を計算する。
   length = ((len3 << 16) | (len2 << 8) | len1) & 0x07fffff;
-	return length;	
+    return length;	
 }
 
 void ArduCAM::set_fifo_burst()
 {
+    // FIFOを連続読み出しモードで読むための処理。
     uint8_t value;
     spi_read_blocking(SPI_PORT, BURST_FIFO_READ, &value, 1);	
 }
@@ -177,471 +218,496 @@ void ArduCAM::set_fifo_burst()
 //Set corresponding bit  
 void ArduCAM::set_bit(uint8_t addr, uint8_t bit)
 {
-	uint8_t temp;
-	temp = read_reg(addr);
-	write_reg(addr, temp | bit);
+    // 指定したレジスタの特定ビットだけを1にする。
+    uint8_t temp;
+    // 現在の値を読んで、マスクで目的のビットだけ立てる。
+    temp = read_reg(addr);
+    write_reg(addr, temp | bit);
 }
 
 
 //Clear corresponding bit 
 void ArduCAM::clear_bit(uint8_t addr, uint8_t bit)
 {
-	uint8_t temp;
-	temp = read_reg(addr);
-	write_reg(addr, temp & (~bit));
+    // 指定したレジスタの特定ビットだけを0にする。
+    uint8_t temp;
+    // 現在値を読んで、対象ビットのみを消去する。
+    temp = read_reg(addr);
+    write_reg(addr, temp & (~bit));
 }
 
 
 //Get corresponding bit status
 uint8_t ArduCAM::get_bit(uint8_t addr, uint8_t bit)
 {
+  // 指定ビットが立っているかを確認する。
   uint8_t temp;
   temp = read_reg(addr);
+  // マスクをかけて対象ビットの状態だけを取り出す。
   temp = temp & bit;
   return temp;
 }
 
 uint8_t ArduCAM::bus_write(int address,int value)
 {	
-	cbi(P_CS, B_CS);
-		//SPI.transfer(address);
-		//SPI.transfer(value);
-	sbi(P_CS, B_CS);
-	return 1;
+    // バス書き込みの雛形。現在はCS制御のみを行っている。
+    cbi(P_CS, B_CS);
+        //SPI.transfer(address);
+        //SPI.transfer(value);
+    // 送信終了後にCSを元に戻す。
+    sbi(P_CS, B_CS);
+    return 1;
 }
 
 
 uint8_t ArduCAM:: bus_read(int address)
 {
-	uint8_t value;
-	cbi(P_CS, B_CS);
-	//	  SPI.transfer(address);
+    // バス読み取りの雛形。現在はCS制御のみを行っている。
+    uint8_t value;
+    cbi(P_CS, B_CS);
+    //	  SPI.transfer(address);
 //		 value = SPI.transfer(0x00);
-	sbi(P_CS, B_CS);
-	return value;
+    sbi(P_CS, B_CS);
+    return value;
 }
 
-	// Write 8 bit values to 8 bit register address
+    // Write 8 bit values to 8 bit register address
 int ArduCAM::wrSensorRegs8_8(const struct sensor_reg reglist[])
 {
-		int err = 0;
-	  uint16_t reg_addr = 0;
-	  uint16_t reg_val = 0;
-	  const struct sensor_reg *next = reglist;
-	  while ((reg_addr != 0xff) | (reg_val != 0xff))
-	  {
-	    reg_addr = next->reg;
-	    reg_val = next->val;
-	    err = wrSensorReg8_8(reg_addr, reg_val);
-	    next++;
-	  }
-	return 1;
+        // 8bitレジスタの初期化テーブルを順に書き込む。
+        int err = 0;
+      uint16_t reg_addr = 0;
+      uint16_t reg_val = 0;
+      const struct sensor_reg *next = reglist;
+      // 終端の0xFF,0xFFまで繰り返しセットする。
+      while ((reg_addr != 0xff) | (reg_val != 0xff))
+      {
+        reg_addr = next->reg;
+        reg_val = next->val;
+        err = wrSensorReg8_8(reg_addr, reg_val); // reg_addr: テーブル項目の書込み先番地、reg_val: 対応する設定値
+        next++;
+      }
+    return 1;
 }
 
-	// Write 16 bit values to 8 bit register address
+    // Write 16 bit values to 8 bit register address
 int ArduCAM::wrSensorRegs8_16(const struct sensor_reg reglist[])
 {
 
-		int err = 0;
-	  unsigned int reg_addr, reg_val;
-	  const struct sensor_reg *next = reglist;
-	  while ((reg_addr != 0xff) | (reg_val != 0xffff))
-	  {
+        int err = 0;
+      unsigned int reg_addr, reg_val;
+      const struct sensor_reg *next = reglist;
+      // 16bitアドレス・8bitデータのペアを順に書き込む。
+      while ((reg_addr != 0xff) | (reg_val != 0xffff))
+      {
 
-	     reg_addr = next->reg;
-	     reg_val = next->val;
-	    err = wrSensorReg8_16(reg_addr, reg_val);
-	    next++;
-	  }
-	return 1;
+         reg_addr = next->reg;
+         reg_val = next->val;
+        err = wrSensorReg8_16(reg_addr, reg_val);
+        next++;
+      }
+    return 1;
 }
 // Write 8 bit values to 16 bit register address
 int ArduCAM::wrSensorRegs16_8(const struct sensor_reg reglist[])
 {
-		int err = 0;
-	  unsigned int reg_addr;
-	  unsigned char reg_val;
-	  const struct sensor_reg *next = reglist;
-	  while ((reg_addr != 0xffff) | (reg_val != 0xff))
-	  {
-	     reg_addr = next->reg;
-	     reg_val = next->val;
-	    err = wrSensorReg16_8(reg_addr, reg_val);
-	    next++;
-	  }
-	return 1;
+        int err = 0;
+      unsigned int reg_addr;
+      unsigned char reg_val;
+      const struct sensor_reg *next = reglist;
+      // 16bitアドレスで構成される設定テーブルを利用する。
+      while ((reg_addr != 0xffff) | (reg_val != 0xff))
+      {
+         reg_addr = next->reg;
+         reg_val = next->val;
+        err = wrSensorReg16_8(reg_addr, reg_val);
+        next++;
+      }
+    return 1;
 }
 
 // Read/write 8 bit value to/from 16 bit register address
 byte ArduCAM::wrSensorReg16_8(int regID, int regDat)
 {
+    // 16bitレジスタ向けのI2C書き込み。
     uint8_t buf[3]={0};
+    // 高位バイト、低位バイト、データの順で送る。
     buf[0]=(regID >> 8)&0xff;
     buf[1]=(regID)&0xff;
     buf[2]=regDat;
+    // センサへ書き込んだあと、少し待ってレジスタ更新を安定させる。
     i2c_write_blocking(I2C_PORT, sensor_addr, buf,  3, true );
-		sleep_ms(2);
-	  return 1;
+        sleep_ms(2);
+      return 1;
 }
 
 // Read/write 8 bit value to/from 8 bit register address	
 byte ArduCAM::wrSensorReg8_8(int regID, int regDat)
 {
-uint8_t buf[2];
+    // 8bitレジスタ向けのI2C書き込み。
+    // regID  : 書き込み先のセンサレジスタ番地（例: 0x00, 0x12, 0xC7）
+    // regDat : そのレジスタに書き込む値（設定値、フラグ、制御値）
+    uint8_t buf[2];
+    // 先頭にレジスタ番地、続けて書き込み値を格納してI2Cで送る。
     buf[0] = regID;
     buf[1] = regDat;
     i2c_write_blocking(I2C_PORT, sensor_addr, buf,  2, true );
-	return 1;
-	
+    return 1;
+    
 }
 
-	void ArduCAM::OV2640_set_Special_effects(uint8_t Special_effect)
-	{
+    void ArduCAM::OV2640_set_Special_effects(uint8_t Special_effect)
+    {
+        // OV2640の特殊効果プリセットを設定する。
+        // 0xff は OV2640 のページ切り替え用レジスタアドレスで、
+        // 0x00 はそのページを page 0 に設定する値。
+        // なので wrSensorReg8_8(0xff, 0x00) は「次の設定を page 0 で行う」ための指定。
 // #if (defined (OV2640_CAM)||defined (OV2640_MINI_2MP)||defined (OV2640_MINI_2MP_PLUS))	
-		switch(Special_effect)
-		{
-			case Antique:
-	
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x18);
-				wrSensorReg8_8(0x7c, 0x05);
-				wrSensorReg8_8(0x7d, 0x40);
-				wrSensorReg8_8(0x7d, 0xa6);
-			break;
-			case Bluish:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x18);
-				wrSensorReg8_8(0x7c, 0x05);
-				wrSensorReg8_8(0x7d, 0xa0);
-				wrSensorReg8_8(0x7d, 0x40);
-			break;
-			case Greenish:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x18);
-				wrSensorReg8_8(0x7c, 0x05);
-				wrSensorReg8_8(0x7d, 0x40);
-				wrSensorReg8_8(0x7d, 0x40);
-			break;
-			case Reddish:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x18);
-				wrSensorReg8_8(0x7c, 0x05);
-				wrSensorReg8_8(0x7d, 0x40);
-				wrSensorReg8_8(0x7d, 0xc0);
-			break;
-			case BW:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x18);
-				wrSensorReg8_8(0x7c, 0x05);
-				wrSensorReg8_8(0x7d, 0x80);
-				wrSensorReg8_8(0x7d, 0x80);
-			break;
-			case Negative:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x40);
-				wrSensorReg8_8(0x7c, 0x05);
-				wrSensorReg8_8(0x7d, 0x80);
-				wrSensorReg8_8(0x7d, 0x80);
-			break;
-			case BWnegative:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x58);
-				wrSensorReg8_8(0x7c, 0x05);
-				wrSensorReg8_8(0x7d, 0x80);
-			  wrSensorReg8_8(0x7d, 0x80);
-	
-			break;
-			case Normal:
-		
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x00);
-				wrSensorReg8_8(0x7c, 0x05);
-				wrSensorReg8_8(0x7d, 0x80);
-				wrSensorReg8_8(0x7d, 0x80);
-			
-			break;
-					
-		}
-	// #endif
-	}
+        switch(Special_effect)
+        {
+            case Antique:
+    
+            wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 効果制御バイトを選択
+                wrSensorReg8_8(0x7d, 0x18); // 0x7d: SDE制御値、0x18: 固定色相の色効果を有効化
+                wrSensorReg8_8(0x7c, 0x05); // 0x7c: SDE項目選択、0x05: 色効果のU/V係数を選択
+                wrSensorReg8_8(0x7d, 0x40); // 0x7d: SDE色効果係数、0x40: Antique 効果のU（青色差）成分
+                wrSensorReg8_8(0x7d, 0xa6); // 0x7d: SDE色効果係数、0xa6: Antique 効果のV（赤色差）成分
+            break;
+            case Bluish:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 効果制御バイトを選択
+                wrSensorReg8_8(0x7d, 0x18); // 0x7d: SDE制御値、0x18: 固定色相の色効果を有効化
+                wrSensorReg8_8(0x7c, 0x05); // 0x7c: SDE項目選択、0x05: 色効果のU/V係数を選択
+                wrSensorReg8_8(0x7d, 0xa0); // 0x7d: SDE色効果係数、0xa0: Bluish 効果のU（青色差）成分
+                wrSensorReg8_8(0x7d, 0x40); // 0x7d: SDE色効果係数、0x40: Bluish 効果のV（赤色差）成分
+            break;
+            case Greenish:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 効果制御バイトを選択
+                wrSensorReg8_8(0x7d, 0x18); // 0x7d: SDE制御値、0x18: 固定色相の色効果を有効化
+                wrSensorReg8_8(0x7c, 0x05); // 0x7c: SDE項目選択、0x05: 色効果のU/V係数を選択
+                wrSensorReg8_8(0x7d, 0x40); // 0x7d: SDE色効果係数、0x40: Greenish 効果のU（青色差）成分
+                wrSensorReg8_8(0x7d, 0x40); // 0x7d: SDE色効果係数、0x40: Greenish 効果のV（赤色差）成分
+            break;
+            case Reddish:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 効果制御バイトを選択
+                wrSensorReg8_8(0x7d, 0x18); // 0x7d: SDE制御値、0x18: 固定色相の色効果を有効化
+                wrSensorReg8_8(0x7c, 0x05); // 0x7c: SDE項目選択、0x05: 色効果のU/V係数を選択
+                wrSensorReg8_8(0x7d, 0x40); // 0x7d: SDE色効果係数、0x40: Reddish 効果のU（青色差）成分
+                wrSensorReg8_8(0x7d, 0xc0); // 0x7d: SDE色効果係数、0xc0: Reddish 効果のV（赤色差）成分
+            break;
+            case BW:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 効果制御バイトを選択
+                wrSensorReg8_8(0x7d, 0x18); // 0x7d: SDE制御値、0x18: 固定色相の色効果を有効化
+                wrSensorReg8_8(0x7c, 0x05); // 0x7c: SDE項目選択、0x05: 色効果のU/V係数を選択
+                wrSensorReg8_8(0x7d, 0x80); // 0x7d: SDE色効果係数、0x80: BW 効果のU（青色差）成分
+                wrSensorReg8_8(0x7d, 0x80); // 0x7d: SDE色効果係数、0x80: BW 効果のV（赤色差）成分
+            break;
+            case Negative:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 効果制御バイトを選択
+                wrSensorReg8_8(0x7d, 0x40); // 0x7d: SDE制御値、0x40: ネガ反転効果を有効化
+                wrSensorReg8_8(0x7c, 0x05); // 0x7c: SDE項目選択、0x05: 色効果のU/V係数を選択
+                wrSensorReg8_8(0x7d, 0x80); // 0x7d: SDE色効果係数、0x80: Negative 効果のU（青色差）成分
+                wrSensorReg8_8(0x7d, 0x80); // 0x7d: SDE色効果係数、0x80: Negative 効果のV（赤色差）成分
+            break;
+            case BWnegative:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 効果制御バイトを選択
+                wrSensorReg8_8(0x7d, 0x58); // 0x7d: SDE制御値、0x58: 白黒ネガ効果用の制御値
+                wrSensorReg8_8(0x7c, 0x05); // 0x7c: SDE項目選択、0x05: 色効果のU/V係数を選択
+                wrSensorReg8_8(0x7d, 0x80); // 0x7d: SDE色効果係数、0x80: BWnegative 効果のU（青色差）成分
+              wrSensorReg8_8(0x7d, 0x80); // 0x7d: SDE色効果係数、0x80: BWnegative 効果のV（赤色差）成分
+    
+            break;
+            case Normal:
+        
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 効果制御バイトを選択
+                wrSensorReg8_8(0x7d, 0x00); // 0x7d: SDE制御値、0x00: 色効果を無効化
+                wrSensorReg8_8(0x7c, 0x05); // 0x7c: SDE項目選択、0x05: 色効果のU/V係数を選択
+                wrSensorReg8_8(0x7d, 0x80); // 0x7d: SDE色効果係数、0x80: Normal 効果のU（青色差）成分
+                wrSensorReg8_8(0x7d, 0x80); // 0x7d: SDE色効果係数、0x80: Normal 効果のV（赤色差）成分
+            
+            break;
+                    
+        }
+    // #endif
+    }
 
 
-	void ArduCAM::OV2640_set_Contrast(uint8_t Contrast)
-	{
+    void ArduCAM::OV2640_set_Contrast(uint8_t Contrast)
+    {
 //  #if (defined (OV2640_CAM)||defined (OV2640_MINI_2MP)||defined (OV2640_MINI_2MP_PLUS))	
-		switch(Contrast)
-		{
-			case Contrast2:
-		
-			wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x04);
-				wrSensorReg8_8(0x7c, 0x07);
-				wrSensorReg8_8(0x7d, 0x20);
-				wrSensorReg8_8(0x7d, 0x28);
-				wrSensorReg8_8(0x7d, 0x0c);
-				wrSensorReg8_8(0x7d, 0x06);
-			break;
-			case Contrast1:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x04);
-				wrSensorReg8_8(0x7c, 0x07);
-				wrSensorReg8_8(0x7d, 0x20);
-				wrSensorReg8_8(0x7d, 0x24);
-				wrSensorReg8_8(0x7d, 0x16);
-				wrSensorReg8_8(0x7d, 0x06); 
-			break;
-			case Contrast0:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x04);
-				wrSensorReg8_8(0x7c, 0x07);
-				wrSensorReg8_8(0x7d, 0x20);
-				wrSensorReg8_8(0x7d, 0x20);
-				wrSensorReg8_8(0x7d, 0x20);
-				wrSensorReg8_8(0x7d, 0x06); 
-			break;
-			case Contrast_1:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x04);
-				wrSensorReg8_8(0x7c, 0x07);
-				wrSensorReg8_8(0x7d, 0x20);
-				wrSensorReg8_8(0x7d, 0x20);
-				wrSensorReg8_8(0x7d, 0x2a);
-		  wrSensorReg8_8(0x7d, 0x06);	
-			break;
-			case Contrast_2:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x04);
-				wrSensorReg8_8(0x7c, 0x07);
-				wrSensorReg8_8(0x7d, 0x20);
-				wrSensorReg8_8(0x7d, 0x18);
-				wrSensorReg8_8(0x7d, 0x34);
-				wrSensorReg8_8(0x7d, 0x06);
-			break;
-		}
+        switch(Contrast)
+        {
+            case Contrast2:
+        
+            wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 明暗調整の有効化項目を選択
+                wrSensorReg8_8(0x7d, 0x04); // 0x7d: SDE制御値、0x04: コントラスト/明るさ調整を有効化
+                wrSensorReg8_8(0x7c, 0x07); // 0x7c: SDE項目選択、0x07: コントラスト曲線係数を選択
+                wrSensorReg8_8(0x7d, 0x20); // 0x7d: コントラスト曲線の固定基準係数、値=0x20
+                wrSensorReg8_8(0x7d, 0x28); // 0x7d: Contrast2 用コントラスト曲線の第1係数、値=0x28
+                wrSensorReg8_8(0x7d, 0x0c); // 0x7d: Contrast2 用コントラスト曲線の第2係数、値=0x0c
+                wrSensorReg8_8(0x7d, 0x06); // 0x7d: コントラスト曲線の固定終端係数、値=0x06
+            break;
+            case Contrast1:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 明暗調整の有効化項目を選択
+                wrSensorReg8_8(0x7d, 0x04); // 0x7d: SDE制御値、0x04: コントラスト/明るさ調整を有効化
+                wrSensorReg8_8(0x7c, 0x07); // 0x7c: SDE項目選択、0x07: コントラスト曲線係数を選択
+                wrSensorReg8_8(0x7d, 0x20); // 0x7d: コントラスト曲線の固定基準係数、値=0x20
+                wrSensorReg8_8(0x7d, 0x24); // 0x7d: Contrast1 用コントラスト曲線の第1係数、値=0x24
+                wrSensorReg8_8(0x7d, 0x16); // 0x7d: Contrast1 用コントラスト曲線の第2係数、値=0x16
+                wrSensorReg8_8(0x7d, 0x06); // 0x7d: コントラスト曲線の固定終端係数、値=0x06
+            break;
+            case Contrast0:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 明暗調整の有効化項目を選択
+                wrSensorReg8_8(0x7d, 0x04); // 0x7d: SDE制御値、0x04: コントラスト/明るさ調整を有効化
+                wrSensorReg8_8(0x7c, 0x07); // 0x7c: SDE項目選択、0x07: コントラスト曲線係数を選択
+                wrSensorReg8_8(0x7d, 0x20); // 0x7d: コントラスト曲線の固定基準係数、値=0x20
+                wrSensorReg8_8(0x7d, 0x20); // 0x7d: Contrast0 用コントラスト曲線の第1係数、値=0x20
+                wrSensorReg8_8(0x7d, 0x20); // 0x7d: Contrast0 用コントラスト曲線の第2係数、値=0x20
+                wrSensorReg8_8(0x7d, 0x06); // 0x7d: コントラスト曲線の固定終端係数、値=0x06
+            break;
+            case Contrast_1:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 明暗調整の有効化項目を選択
+                wrSensorReg8_8(0x7d, 0x04); // 0x7d: SDE制御値、0x04: コントラスト/明るさ調整を有効化
+                wrSensorReg8_8(0x7c, 0x07); // 0x7c: SDE項目選択、0x07: コントラスト曲線係数を選択
+                wrSensorReg8_8(0x7d, 0x20); // 0x7d: コントラスト曲線の固定基準係数、値=0x20
+                wrSensorReg8_8(0x7d, 0x20); // 0x7d: Contrast_1 用コントラスト曲線の第1係数、値=0x20
+                wrSensorReg8_8(0x7d, 0x2a); // 0x7d: Contrast_1 用コントラスト曲線の第2係数、値=0x2a
+          wrSensorReg8_8(0x7d, 0x06); // 0x7d: コントラスト曲線の固定終端係数、値=0x06
+            break;
+            case Contrast_2:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 明暗調整の有効化項目を選択
+                wrSensorReg8_8(0x7d, 0x04); // 0x7d: SDE制御値、0x04: コントラスト/明るさ調整を有効化
+                wrSensorReg8_8(0x7c, 0x07); // 0x7c: SDE項目選択、0x07: コントラスト曲線係数を選択
+                wrSensorReg8_8(0x7d, 0x20); // 0x7d: コントラスト曲線の固定基準係数、値=0x20
+                wrSensorReg8_8(0x7d, 0x18); // 0x7d: Contrast_2 用コントラスト曲線の第1係数、値=0x18
+                wrSensorReg8_8(0x7d, 0x34); // 0x7d: Contrast_2 用コントラスト曲線の第2係数、値=0x34
+                wrSensorReg8_8(0x7d, 0x06); // 0x7d: コントラスト曲線の固定終端係数、値=0x06
+            break;
+        }
 // #endif		
-	}
+    }
 
-	void ArduCAM::OV2640_set_Brightness(uint8_t Brightness)
-	{
-	// #if (defined (OV2640_CAM)||defined (OV2640_MINI_2MP)||defined (OV2640_MINI_2MP_PLUS))
-		switch(Brightness)
-		{
-			case Brightness2:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x04);
-				wrSensorReg8_8(0x7c, 0x09);
-				wrSensorReg8_8(0x7d, 0x40);
-				wrSensorReg8_8(0x7d, 0x00);
-			break;
-			case Brightness1:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x04);
-				wrSensorReg8_8(0x7c, 0x09);
-				wrSensorReg8_8(0x7d, 0x30);
-				wrSensorReg8_8(0x7d, 0x00);
-			break;	
-			case Brightness0:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x04);
-				wrSensorReg8_8(0x7c, 0x09);
-				wrSensorReg8_8(0x7d, 0x20);
-				wrSensorReg8_8(0x7d, 0x00);
-			break;
-			case Brightness_1:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x04);
-				wrSensorReg8_8(0x7c, 0x09);
-				wrSensorReg8_8(0x7d, 0x10);
-				wrSensorReg8_8(0x7d, 0x00);
-			break;
-			case Brightness_2:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x04);
-				wrSensorReg8_8(0x7c, 0x09);
-				wrSensorReg8_8(0x7d, 0x00);
-				wrSensorReg8_8(0x7d, 0x00);
-			break;	
-		}
+    void ArduCAM::OV2640_set_Brightness(uint8_t Brightness)
+    {
+    // #if (defined (OV2640_CAM)||defined (OV2640_MINI_2MP)||defined (OV2640_MINI_2MP_PLUS))
+        switch(Brightness)
+        {
+            case Brightness2:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 明暗調整の有効化項目を選択
+                wrSensorReg8_8(0x7d, 0x04); // 0x7d: SDE制御値、0x04: コントラスト/明るさ調整を有効化
+                wrSensorReg8_8(0x7c, 0x09); // 0x7c: SDE項目選択、0x09: 明るさオフセットを選択
+                wrSensorReg8_8(0x7d, 0x40); // 0x7d: 明るさオフセット、0x40: +2（最も明るい）
+                wrSensorReg8_8(0x7d, 0x00); // 0x7d: 明るさ設定の後続データ、0x00: 追加オフセットなし
+            break;
+            case Brightness1:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 明暗調整の有効化項目を選択
+                wrSensorReg8_8(0x7d, 0x04); // 0x7d: SDE制御値、0x04: コントラスト/明るさ調整を有効化
+                wrSensorReg8_8(0x7c, 0x09); // 0x7c: SDE項目選択、0x09: 明るさオフセットを選択
+                wrSensorReg8_8(0x7d, 0x30); // 0x7d: 明るさオフセット、0x30: +1
+                wrSensorReg8_8(0x7d, 0x00); // 0x7d: 明るさ設定の後続データ、0x00: 追加オフセットなし
+            break;	
+            case Brightness0:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 明暗調整の有効化項目を選択
+                wrSensorReg8_8(0x7d, 0x04); // 0x7d: SDE制御値、0x04: コントラスト/明るさ調整を有効化
+                wrSensorReg8_8(0x7c, 0x09); // 0x7c: SDE項目選択、0x09: 明るさオフセットを選択
+                wrSensorReg8_8(0x7d, 0x20); // 0x7d: 明るさオフセット、0x20: 0（基準）
+                wrSensorReg8_8(0x7d, 0x00); // 0x7d: 明るさ設定の後続データ、0x00: 追加オフセットなし
+            break;
+            case Brightness_1:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 明暗調整の有効化項目を選択
+                wrSensorReg8_8(0x7d, 0x04); // 0x7d: SDE制御値、0x04: コントラスト/明るさ調整を有効化
+                wrSensorReg8_8(0x7c, 0x09); // 0x7c: SDE項目選択、0x09: 明るさオフセットを選択
+                wrSensorReg8_8(0x7d, 0x10); // 0x7d: 明るさオフセット、0x10: -1
+                wrSensorReg8_8(0x7d, 0x00); // 0x7d: 明るさ設定の後続データ、0x00: 追加オフセットなし
+            break;
+            case Brightness_2:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 明暗調整の有効化項目を選択
+                wrSensorReg8_8(0x7d, 0x04); // 0x7d: SDE制御値、0x04: コントラスト/明るさ調整を有効化
+                wrSensorReg8_8(0x7c, 0x09); // 0x7c: SDE項目選択、0x09: 明るさオフセットを選択
+                wrSensorReg8_8(0x7d, 0x00); // 0x7d: 明るさオフセット、0x00: -2（最も暗い）
+                wrSensorReg8_8(0x7d, 0x00); // 0x7d: 明るさ設定の後続データ、0x00: 追加オフセットなし
+            break;	
+        }
 // #endif	
-			
-	}
+            
+    }
 
-	void ArduCAM::OV2640_set_Color_Saturation(uint8_t Color_Saturation)
-	{
-	// #if (defined (OV2640_CAM)||defined (OV2640_MINI_2MP)||defined (OV2640_MINI_2MP_PLUS))
-		switch(Color_Saturation)
-		{
-			case Saturation2:
-			
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x02);
-				wrSensorReg8_8(0x7c, 0x03);
-				wrSensorReg8_8(0x7d, 0x68);
-				wrSensorReg8_8(0x7d, 0x68);
-			break;
-			case Saturation1:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x02);
-				wrSensorReg8_8(0x7c, 0x03);
-				wrSensorReg8_8(0x7d, 0x58);
-				wrSensorReg8_8(0x7d, 0x58);
-			break;
-			case Saturation0:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x02);
-				wrSensorReg8_8(0x7c, 0x03);
-				wrSensorReg8_8(0x7d, 0x48);
-				wrSensorReg8_8(0x7d, 0x48);
-			break;
-			case Saturation_1:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x02);
-				wrSensorReg8_8(0x7c, 0x03);
-				wrSensorReg8_8(0x7d, 0x38);
-				wrSensorReg8_8(0x7d, 0x38);
-			break;
-			case Saturation_2:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0x7c, 0x00);
-				wrSensorReg8_8(0x7d, 0x02);
-				wrSensorReg8_8(0x7c, 0x03);
-				wrSensorReg8_8(0x7d, 0x28);
-				wrSensorReg8_8(0x7d, 0x28);
-			break;	
-		}
+    void ArduCAM::OV2640_set_Color_Saturation(uint8_t Color_Saturation)
+    {
+    // #if (defined (OV2640_CAM)||defined (OV2640_MINI_2MP)||defined (OV2640_MINI_2MP_PLUS))
+        switch(Color_Saturation)
+        {
+            case Saturation2:
+            
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 彩度調整の有効化項目を選択
+                wrSensorReg8_8(0x7d, 0x02); // 0x7d: SDE制御値、0x02: 彩度調整を有効化
+                wrSensorReg8_8(0x7c, 0x03); // 0x7c: SDE項目選択、0x03: 彩度のU/Vゲインを選択
+                wrSensorReg8_8(0x7d, 0x68); // 0x7d: 彩度のU（青色差）ゲイン、0x68: +2（最も高い）
+                wrSensorReg8_8(0x7d, 0x68); // 0x7d: 彩度のV（赤色差）ゲイン、0x68: +2（最も高い）
+            break;
+            case Saturation1:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 彩度調整の有効化項目を選択
+                wrSensorReg8_8(0x7d, 0x02); // 0x7d: SDE制御値、0x02: 彩度調整を有効化
+                wrSensorReg8_8(0x7c, 0x03); // 0x7c: SDE項目選択、0x03: 彩度のU/Vゲインを選択
+                wrSensorReg8_8(0x7d, 0x58); // 0x7d: 彩度のU（青色差）ゲイン、0x58: +1
+                wrSensorReg8_8(0x7d, 0x58); // 0x7d: 彩度のV（赤色差）ゲイン、0x58: +1
+            break;
+            case Saturation0:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 彩度調整の有効化項目を選択
+                wrSensorReg8_8(0x7d, 0x02); // 0x7d: SDE制御値、0x02: 彩度調整を有効化
+                wrSensorReg8_8(0x7c, 0x03); // 0x7c: SDE項目選択、0x03: 彩度のU/Vゲインを選択
+                wrSensorReg8_8(0x7d, 0x48); // 0x7d: 彩度のU（青色差）ゲイン、0x48: 0（基準）
+                wrSensorReg8_8(0x7d, 0x48); // 0x7d: 彩度のV（赤色差）ゲイン、0x48: 0（基準）
+            break;
+            case Saturation_1:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 彩度調整の有効化項目を選択
+                wrSensorReg8_8(0x7d, 0x02); // 0x7d: SDE制御値、0x02: 彩度調整を有効化
+                wrSensorReg8_8(0x7c, 0x03); // 0x7c: SDE項目選択、0x03: 彩度のU/Vゲインを選択
+                wrSensorReg8_8(0x7d, 0x38); // 0x7d: 彩度のU（青色差）ゲイン、0x38: -1
+                wrSensorReg8_8(0x7d, 0x38); // 0x7d: 彩度のV（赤色差）ゲイン、0x38: -1
+            break;
+            case Saturation_2:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0x7c, 0x00); // 0x7c: SDE項目選択、0x00: 彩度調整の有効化項目を選択
+                wrSensorReg8_8(0x7d, 0x02); // 0x7d: SDE制御値、0x02: 彩度調整を有効化
+                wrSensorReg8_8(0x7c, 0x03); // 0x7c: SDE項目選択、0x03: 彩度のU/Vゲインを選択
+                wrSensorReg8_8(0x7d, 0x28); // 0x7d: 彩度のU（青色差）ゲイン、0x28: -2（最も低い）
+                wrSensorReg8_8(0x7d, 0x28); // 0x7d: 彩度のV（赤色差）ゲイン、0x28: -2（最も低い）
+            break;	
+        }
 // #endif	
-	}
+    }
 
 void ArduCAM::OV2640_set_Light_Mode(uint8_t Light_Mode)
-	{
+    {
 //  #if (defined (OV2640_CAM)||defined (OV2640_MINI_2MP)||defined (OV2640_MINI_2MP_PLUS))
-		 switch(Light_Mode)
-		 {
-			
-			  case Auto:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0xc7, 0x00); //AWB on
-			  break;
-			  case Sunny:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0xc7, 0x40); //AWB off
-			  wrSensorReg8_8(0xcc, 0x5e);
-				wrSensorReg8_8(0xcd, 0x41);
-				wrSensorReg8_8(0xce, 0x54);
-			  break;
-			  case Cloudy:
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0xc7, 0x40); //AWB off
-				wrSensorReg8_8(0xcc, 0x65);
-				wrSensorReg8_8(0xcd, 0x41);
-				wrSensorReg8_8(0xce, 0x4f);  
-			  break;
-			  case Office:
-			  wrSensorReg8_8(0xff, 0x00);
-			  wrSensorReg8_8(0xc7, 0x40); //AWB off
-			  wrSensorReg8_8(0xcc, 0x52);
-			  wrSensorReg8_8(0xcd, 0x41);
-			  wrSensorReg8_8(0xce, 0x66);
-			  break;
-			  case Home:
-			  wrSensorReg8_8(0xff, 0x00);
-			  wrSensorReg8_8(0xc7, 0x40); //AWB off
-			  wrSensorReg8_8(0xcc, 0x42);
-			  wrSensorReg8_8(0xcd, 0x3f);
-			  wrSensorReg8_8(0xce, 0x71);
-			  break;
-			  default :
-				wrSensorReg8_8(0xff, 0x00);
-				wrSensorReg8_8(0xc7, 0x00); //AWB on
-			  break; 
-		 }	
+         switch(Light_Mode)
+         {
+            
+              case Auto:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0xc7, 0x00); // 0xc7: AWB制御、0x00: オートホワイトバランスを有効化
+              break;
+              case Sunny:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0xc7, 0x40); // 0xc7: AWB制御、0x40: AWBを停止し手動色温度ゲインを使用
+              wrSensorReg8_8(0xcc, 0x5e); // 0xcc: 手動ホワイトバランスの赤ゲイン、0x5e: Sunny プリセット値
+                wrSensorReg8_8(0xcd, 0x41); // 0xcd: 手動ホワイトバランスの緑ゲイン、0x41: Sunny プリセット値
+                wrSensorReg8_8(0xce, 0x54); // 0xce: 手動ホワイトバランスの青ゲイン、0x54: Sunny プリセット値
+              break;
+              case Cloudy:
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0xc7, 0x40); // 0xc7: AWB制御、0x40: AWBを停止し手動色温度ゲインを使用
+                wrSensorReg8_8(0xcc, 0x65); // 0xcc: 手動ホワイトバランスの赤ゲイン、0x65: Cloudy プリセット値
+                wrSensorReg8_8(0xcd, 0x41); // 0xcd: 手動ホワイトバランスの緑ゲイン、0x41: Cloudy プリセット値
+                wrSensorReg8_8(0xce, 0x4f); // 0xce: 手動ホワイトバランスの青ゲイン、0x4f: Cloudy プリセット値
+              break;
+              case Office:
+              wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+              wrSensorReg8_8(0xc7, 0x40); // 0xc7: AWB制御、0x40: AWBを停止し手動色温度ゲインを使用
+              wrSensorReg8_8(0xcc, 0x52); // 0xcc: 手動ホワイトバランスの赤ゲイン、0x52: Office プリセット値
+              wrSensorReg8_8(0xcd, 0x41); // 0xcd: 手動ホワイトバランスの緑ゲイン、0x41: Office プリセット値
+              wrSensorReg8_8(0xce, 0x66); // 0xce: 手動ホワイトバランスの青ゲイン、0x66: Office プリセット値
+              break;
+              case Home:
+              wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+              wrSensorReg8_8(0xc7, 0x40); // 0xc7: AWB制御、0x40: AWBを停止し手動色温度ゲインを使用
+              wrSensorReg8_8(0xcc, 0x42); // 0xcc: 手動ホワイトバランスの赤ゲイン、0x42: Home プリセット値
+              wrSensorReg8_8(0xcd, 0x3f); // 0xcd: 手動ホワイトバランスの緑ゲイン、0x3f: Home プリセット値
+              wrSensorReg8_8(0xce, 0x71); // 0xce: 手動ホワイトバランスの青ゲイン、0x71: Home プリセット値
+              break;
+              default :
+                wrSensorReg8_8(0xff, 0x00); // 0xff: バンク選択、0x00: 画像処理用DSPバンク
+                wrSensorReg8_8(0xc7, 0x00); // 0xc7: AWB制御、0x00: オートホワイトバランスを有効化
+              break; 
+         }	
 // #endif
-	}
+    }
 
 byte ArduCAM::rdSensorReg8_8(uint8_t regID, uint8_t* regDat)
 {	
   i2c_write_blocking(I2C_PORT, sensor_addr, &regID, 1, true );
   i2c_read_blocking(I2C_PORT, sensor_addr, regDat,  1, false );
   return 1;
-	
+    
 }
 
 byte ArduCAM::rdSensorReg16_8(uint16_t regID, uint8_t* regDat)
 {
-	uint8_t buffer[2]={0};
-	buffer[0]=(regID>>8)&0xff;
-	buffer[1]=regID&0xff;
-	i2c_write_blocking(I2C_PORT, sensor_addr, buffer, 2, true );
+    uint8_t buffer[2]={0};
+    buffer[0]=(regID>>8)&0xff;
+    buffer[1]=regID&0xff;
+    i2c_write_blocking(I2C_PORT, sensor_addr, buffer, 2, true );
 //	i2c_write_blocking(I2C_PORT, sensor_addr, &low, 1, true );
-	i2c_read_blocking(I2C_PORT, sensor_addr, regDat,  1, false );
-	return 1;
+    i2c_read_blocking(I2C_PORT, sensor_addr, regDat,  1, false );
+    return 1;
 }
 
 
 void ArduCAM::OV2640_set_JPEG_size(uint8_t size)
 {
 // #if (defined (OV2640_CAM)||defined (OV2640_MINI_2MP)||defined (OV2640_MINI_2MP_PLUS))
-	switch(size)
-	{
-		case OV2640_160x120:
-			wrSensorRegs8_8(OV2640_160x120_JPEG);
-			break;
-		case OV2640_176x144:
-			wrSensorRegs8_8(OV2640_176x144_JPEG);
-			break;
-		case OV2640_320x240:
-			wrSensorRegs8_8(OV2640_320x240_JPEG);
-			break;
-		case OV2640_352x288:
-	  	wrSensorRegs8_8(OV2640_352x288_JPEG);
-			break;
-		case OV2640_640x480:
-			wrSensorRegs8_8(OV2640_640x480_JPEG);
-			break;
-		case OV2640_800x600:
-			wrSensorRegs8_8(OV2640_800x600_JPEG);
-			break;
-		case OV2640_1024x768:
-			wrSensorRegs8_8(OV2640_1024x768_JPEG);
-			break;
-		case OV2640_1280x1024:
-			wrSensorRegs8_8(OV2640_1280x1024_JPEG);
-			break;
-		case OV2640_1600x1200:
-			wrSensorRegs8_8(OV2640_1600x1200_JPEG);
-			break;
-		default:
-			wrSensorRegs8_8(OV2640_320x240_JPEG);
-			break;
-	}
+    switch(size)
+    {
+        case OV2640_160x120:
+            wrSensorRegs8_8(OV2640_160x120_JPEG);
+            break;
+        case OV2640_176x144:
+            wrSensorRegs8_8(OV2640_176x144_JPEG);
+            break;
+        case OV2640_320x240:
+            wrSensorRegs8_8(OV2640_320x240_JPEG);
+            break;
+        case OV2640_352x288:
+          wrSensorRegs8_8(OV2640_352x288_JPEG);
+            break;
+        case OV2640_640x480:
+            wrSensorRegs8_8(OV2640_640x480_JPEG);
+            break;
+        case OV2640_800x600:
+            wrSensorRegs8_8(OV2640_800x600_JPEG);
+            break;
+        case OV2640_1024x768:
+            wrSensorRegs8_8(OV2640_1024x768_JPEG);
+            break;
+        case OV2640_1280x1024:
+            wrSensorRegs8_8(OV2640_1280x1024_JPEG);
+            break;
+        case OV2640_1600x1200:
+            wrSensorRegs8_8(OV2640_1600x1200_JPEG);
+            break;
+        default:
+            wrSensorRegs8_8(OV2640_320x240_JPEG);
+            break;
+    }
 //#endif
 }
 
 
 void ArduCAM::set_format(byte fmt)
 {
+  // 画像形式をBMP/RAW/JPEGに切り替える。
   if (fmt == BMP)
     m_fmt = BMP;
   else if(fmt == RAW)
@@ -653,6 +719,7 @@ unsigned char usart_symbol=0;
 unsigned char usart_Command = 0;
 // RX interrupt handler
 void on_uart_rx() {
+    // UART受信データを保持する。
     while (uart_is_readable(UART_ID)) {
        usart_Command = uart_getc(UART_ID);
        usart_symbol=1;
@@ -660,6 +727,7 @@ void on_uart_rx() {
 }
 void ArduCAM:: Arducam_init(void)
 {
+    // I2CとSPIをカメラ制御用に初期化する。
     // This example will use I2C0 on GPIO4 (SDA) and GPIO5 (SCL)
   i2c_init(I2C_PORT, 100 * 1000);
   gpio_set_function(PIN_SDA, GPIO_FUNC_I2C);
@@ -678,6 +746,7 @@ void ArduCAM:: Arducam_init(void)
 
 void ArduCAM::OV5642_set_JPEG_size(uint8_t size)
 {
+  // OV5642の解像度を選択する。
 //#if defined(OV5642_CAM) || defined(OV5642_CAM_BIT_ROTATION_FIXED)|| defined(OV5642_MINI_5MP) || defined (OV5642_MINI_5MP_PLUS)
   uint8_t reg_val;
 
@@ -714,74 +783,74 @@ void ArduCAM::OV5642_set_JPEG_size(uint8_t size)
 void ArduCAM::OV5642_set_Light_Mode(uint8_t Light_Mode)
 {
 //#if defined(OV5642_CAM) || defined(OV5642_CAM_BIT_ROTATION_FIXED)|| defined(OV5642_MINI_5MP) || defined (OV5642_MINI_5MP_PLUS)
-		switch(Light_Mode)
-		{
-		
-			case Advanced_AWB:
-			wrSensorReg16_8(0x3406 ,0x0 );
-			wrSensorReg16_8(0x5192 ,0x04);
-			wrSensorReg16_8(0x5191 ,0xf8);
-			wrSensorReg16_8(0x518d ,0x26);
-			wrSensorReg16_8(0x518f ,0x42);
-			wrSensorReg16_8(0x518e ,0x2b);
-			wrSensorReg16_8(0x5190 ,0x42);
-			wrSensorReg16_8(0x518b ,0xd0);
-			wrSensorReg16_8(0x518c ,0xbd);
-			wrSensorReg16_8(0x5187 ,0x18);
-			wrSensorReg16_8(0x5188 ,0x18);
-			wrSensorReg16_8(0x5189 ,0x56);
-			wrSensorReg16_8(0x518a ,0x5c);
-			wrSensorReg16_8(0x5186 ,0x1c);
-			wrSensorReg16_8(0x5181 ,0x50);
-			wrSensorReg16_8(0x5184 ,0x20);
-			wrSensorReg16_8(0x5182 ,0x11);
-			wrSensorReg16_8(0x5183 ,0x0 );	
-			break;
-			case Simple_AWB:
-			wrSensorReg16_8(0x3406 ,0x00);
-			wrSensorReg16_8(0x5183 ,0x80);
-			wrSensorReg16_8(0x5191 ,0xff);
-			wrSensorReg16_8(0x5192 ,0x00);
-			break;
-			case Manual_day:
-			wrSensorReg16_8(0x3406 ,0x1 );
-			wrSensorReg16_8(0x3400 ,0x7 );
-			wrSensorReg16_8(0x3401 ,0x32);
-			wrSensorReg16_8(0x3402 ,0x4 );
-			wrSensorReg16_8(0x3403 ,0x0 );
-			wrSensorReg16_8(0x3404 ,0x5 );
-			wrSensorReg16_8(0x3405 ,0x36);
-			break;
-			case Manual_A:
-			wrSensorReg16_8(0x3406 ,0x1 );
-			wrSensorReg16_8(0x3400 ,0x4 );
-			wrSensorReg16_8(0x3401 ,0x88);
-			wrSensorReg16_8(0x3402 ,0x4 );
-			wrSensorReg16_8(0x3403 ,0x0 );
-			wrSensorReg16_8(0x3404 ,0x8 );
-			wrSensorReg16_8(0x3405 ,0xb6);
-			break;
-			case Manual_cwf:
-			wrSensorReg16_8(0x3406 ,0x1 );
-			wrSensorReg16_8(0x3400 ,0x6 );
-			wrSensorReg16_8(0x3401 ,0x13);
-			wrSensorReg16_8(0x3402 ,0x4 );
-			wrSensorReg16_8(0x3403 ,0x0 );
-			wrSensorReg16_8(0x3404 ,0x7 );
-			wrSensorReg16_8(0x3405 ,0xe2);
-			break;
-			case Manual_cloudy:
-			wrSensorReg16_8(0x3406 ,0x1 );
-			wrSensorReg16_8(0x3400 ,0x7 );
-			wrSensorReg16_8(0x3401 ,0x88);
-			wrSensorReg16_8(0x3402 ,0x4 );
-			wrSensorReg16_8(0x3403 ,0x0 );
-			wrSensorReg16_8(0x3404 ,0x5 );
-			wrSensorReg16_8(0x3405 ,0x0);
-			break;
-			default :
-			break; 
-		}	
+        switch(Light_Mode)
+        {
+        
+            case Advanced_AWB:
+            wrSensorReg16_8(0x3406 ,0x0 );
+            wrSensorReg16_8(0x5192 ,0x04);
+            wrSensorReg16_8(0x5191 ,0xf8);
+            wrSensorReg16_8(0x518d ,0x26);
+            wrSensorReg16_8(0x518f ,0x42);
+            wrSensorReg16_8(0x518e ,0x2b);
+            wrSensorReg16_8(0x5190 ,0x42);
+            wrSensorReg16_8(0x518b ,0xd0);
+            wrSensorReg16_8(0x518c ,0xbd);
+            wrSensorReg16_8(0x5187 ,0x18);
+            wrSensorReg16_8(0x5188 ,0x18);
+            wrSensorReg16_8(0x5189 ,0x56);
+            wrSensorReg16_8(0x518a ,0x5c);
+            wrSensorReg16_8(0x5186 ,0x1c);
+            wrSensorReg16_8(0x5181 ,0x50);
+            wrSensorReg16_8(0x5184 ,0x20);
+            wrSensorReg16_8(0x5182 ,0x11);
+            wrSensorReg16_8(0x5183 ,0x0 );	
+            break;
+            case Simple_AWB:
+            wrSensorReg16_8(0x3406 ,0x00);
+            wrSensorReg16_8(0x5183 ,0x80);
+            wrSensorReg16_8(0x5191 ,0xff);
+            wrSensorReg16_8(0x5192 ,0x00);
+            break;
+            case Manual_day:
+            wrSensorReg16_8(0x3406 ,0x1 );
+            wrSensorReg16_8(0x3400 ,0x7 );
+            wrSensorReg16_8(0x3401 ,0x32);
+            wrSensorReg16_8(0x3402 ,0x4 );
+            wrSensorReg16_8(0x3403 ,0x0 );
+            wrSensorReg16_8(0x3404 ,0x5 );
+            wrSensorReg16_8(0x3405 ,0x36);
+            break;
+            case Manual_A:
+            wrSensorReg16_8(0x3406 ,0x1 );
+            wrSensorReg16_8(0x3400 ,0x4 );
+            wrSensorReg16_8(0x3401 ,0x88);
+            wrSensorReg16_8(0x3402 ,0x4 );
+            wrSensorReg16_8(0x3403 ,0x0 );
+            wrSensorReg16_8(0x3404 ,0x8 );
+            wrSensorReg16_8(0x3405 ,0xb6);
+            break;
+            case Manual_cwf:
+            wrSensorReg16_8(0x3406 ,0x1 );
+            wrSensorReg16_8(0x3400 ,0x6 );
+            wrSensorReg16_8(0x3401 ,0x13);
+            wrSensorReg16_8(0x3402 ,0x4 );
+            wrSensorReg16_8(0x3403 ,0x0 );
+            wrSensorReg16_8(0x3404 ,0x7 );
+            wrSensorReg16_8(0x3405 ,0xe2);
+            break;
+            case Manual_cloudy:
+            wrSensorReg16_8(0x3406 ,0x1 );
+            wrSensorReg16_8(0x3400 ,0x7 );
+            wrSensorReg16_8(0x3401 ,0x88);
+            wrSensorReg16_8(0x3402 ,0x4 );
+            wrSensorReg16_8(0x3403 ,0x0 );
+            wrSensorReg16_8(0x3404 ,0x5 );
+            wrSensorReg16_8(0x3405 ,0x0);
+            break;
+            default :
+            break; 
+        }	
 //#endif
 }
 
@@ -789,64 +858,64 @@ void ArduCAM::OV5642_set_Light_Mode(uint8_t Light_Mode)
 void ArduCAM::OV5642_set_Color_Saturation(uint8_t Color_Saturation)
 {
 //#if defined(OV5642_CAM) || defined(OV5642_CAM_BIT_ROTATION_FIXED)|| defined(OV5642_MINI_5MP) || defined (OV5642_MINI_5MP_PLUS)
-	
-		switch(Color_Saturation)
-		{
-			case Saturation4:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5583 ,0x80);
-				wrSensorReg16_8(0x5584 ,0x80);
-				wrSensorReg16_8(0x5580 ,0x02);
-			break;
-			case Saturation3:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5583 ,0x70);
-				wrSensorReg16_8(0x5584 ,0x70);
-				wrSensorReg16_8(0x5580 ,0x02);
-			break;
-			case Saturation2:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5583 ,0x60);
-				wrSensorReg16_8(0x5584 ,0x60);
-				wrSensorReg16_8(0x5580 ,0x02);
-			break;
-			case Saturation1:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5583 ,0x50);
-				wrSensorReg16_8(0x5584 ,0x50);
-				wrSensorReg16_8(0x5580 ,0x02);
-			break;
-			case Saturation0:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5583 ,0x40);
-				wrSensorReg16_8(0x5584 ,0x40);
-				wrSensorReg16_8(0x5580 ,0x02);
-			break;		
-			case Saturation_1:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5583 ,0x30);
-				wrSensorReg16_8(0x5584 ,0x30);
-				wrSensorReg16_8(0x5580 ,0x02);
-			break;
-				case Saturation_2:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5583 ,0x20);
-				wrSensorReg16_8(0x5584 ,0x20);
-				wrSensorReg16_8(0x5580 ,0x02);
-			break;
-				case Saturation_3:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5583 ,0x10);
-				wrSensorReg16_8(0x5584 ,0x10);
-				wrSensorReg16_8(0x5580 ,0x02);
-			break;
-				case Saturation_4:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5583 ,0x00);
-				wrSensorReg16_8(0x5584 ,0x00);
-				wrSensorReg16_8(0x5580 ,0x02);
-			break;
-		}
+    
+        switch(Color_Saturation)
+        {
+            case Saturation4:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5583 ,0x80);
+                wrSensorReg16_8(0x5584 ,0x80);
+                wrSensorReg16_8(0x5580 ,0x02);
+            break;
+            case Saturation3:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5583 ,0x70);
+                wrSensorReg16_8(0x5584 ,0x70);
+                wrSensorReg16_8(0x5580 ,0x02);
+            break;
+            case Saturation2:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5583 ,0x60);
+                wrSensorReg16_8(0x5584 ,0x60);
+                wrSensorReg16_8(0x5580 ,0x02);
+            break;
+            case Saturation1:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5583 ,0x50);
+                wrSensorReg16_8(0x5584 ,0x50);
+                wrSensorReg16_8(0x5580 ,0x02);
+            break;
+            case Saturation0:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5583 ,0x40);
+                wrSensorReg16_8(0x5584 ,0x40);
+                wrSensorReg16_8(0x5580 ,0x02);
+            break;		
+            case Saturation_1:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5583 ,0x30);
+                wrSensorReg16_8(0x5584 ,0x30);
+                wrSensorReg16_8(0x5580 ,0x02);
+            break;
+                case Saturation_2:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5583 ,0x20);
+                wrSensorReg16_8(0x5584 ,0x20);
+                wrSensorReg16_8(0x5580 ,0x02);
+            break;
+                case Saturation_3:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5583 ,0x10);
+                wrSensorReg16_8(0x5584 ,0x10);
+                wrSensorReg16_8(0x5580 ,0x02);
+            break;
+                case Saturation_4:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5583 ,0x00);
+                wrSensorReg16_8(0x5584 ,0x00);
+                wrSensorReg16_8(0x5580 ,0x02);
+            break;
+        }
 //#endif	
 }
 
@@ -854,138 +923,138 @@ void ArduCAM::OV5642_set_Color_Saturation(uint8_t Color_Saturation)
 void ArduCAM::OV5642_set_Brightness(uint8_t Brightness)
 {
 //	#if defined(OV5642_CAM) || defined(OV5642_CAM_BIT_ROTATION_FIXED)|| defined(OV5642_MINI_5MP) || defined (OV5642_MINI_5MP_PLUS)
-	
-		switch(Brightness)
-		{
-			case Brightness4:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5589 ,0x40);
-				wrSensorReg16_8(0x5580 ,0x04);
-				wrSensorReg16_8(0x558a ,0x00);
-			break;
-			case Brightness3:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5589 ,0x30);
-				wrSensorReg16_8(0x5580 ,0x04);
-				wrSensorReg16_8(0x558a ,0x00);
-			break;	
-			case Brightness2:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5589 ,0x20);
-				wrSensorReg16_8(0x5580 ,0x04);
-				wrSensorReg16_8(0x558a ,0x00);
-			break;
-			case Brightness1:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5589 ,0x10);
-				wrSensorReg16_8(0x5580 ,0x04);
-				wrSensorReg16_8(0x558a ,0x00);
-			break;
-			case Brightness0:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5589 ,0x00);
-				wrSensorReg16_8(0x5580 ,0x04);
-				wrSensorReg16_8(0x558a ,0x00);
-			break;	
-			case Brightness_1:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5589 ,0x10);
-				wrSensorReg16_8(0x5580 ,0x04);
-				wrSensorReg16_8(0x558a ,0x08);
-			break;	
-			case Brightness_2:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5589 ,0x20);
-				wrSensorReg16_8(0x5580 ,0x04);
-				wrSensorReg16_8(0x558a ,0x08);
-			break;	
-			case Brightness_3:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5589 ,0x30);
-				wrSensorReg16_8(0x5580 ,0x04);
-				wrSensorReg16_8(0x558a ,0x08);
-			break;	
-			case Brightness_4:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5589 ,0x40);
-				wrSensorReg16_8(0x5580 ,0x04);
-				wrSensorReg16_8(0x558a ,0x08);
-			break;	
-		}
+    
+        switch(Brightness)
+        {
+            case Brightness4:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5589 ,0x40);
+                wrSensorReg16_8(0x5580 ,0x04);
+                wrSensorReg16_8(0x558a ,0x00);
+            break;
+            case Brightness3:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5589 ,0x30);
+                wrSensorReg16_8(0x5580 ,0x04);
+                wrSensorReg16_8(0x558a ,0x00);
+            break;	
+            case Brightness2:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5589 ,0x20);
+                wrSensorReg16_8(0x5580 ,0x04);
+                wrSensorReg16_8(0x558a ,0x00);
+            break;
+            case Brightness1:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5589 ,0x10);
+                wrSensorReg16_8(0x5580 ,0x04);
+                wrSensorReg16_8(0x558a ,0x00);
+            break;
+            case Brightness0:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5589 ,0x00);
+                wrSensorReg16_8(0x5580 ,0x04);
+                wrSensorReg16_8(0x558a ,0x00);
+            break;	
+            case Brightness_1:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5589 ,0x10);
+                wrSensorReg16_8(0x5580 ,0x04);
+                wrSensorReg16_8(0x558a ,0x08);
+            break;	
+            case Brightness_2:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5589 ,0x20);
+                wrSensorReg16_8(0x5580 ,0x04);
+                wrSensorReg16_8(0x558a ,0x08);
+            break;	
+            case Brightness_3:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5589 ,0x30);
+                wrSensorReg16_8(0x5580 ,0x04);
+                wrSensorReg16_8(0x558a ,0x08);
+            break;	
+            case Brightness_4:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5589 ,0x40);
+                wrSensorReg16_8(0x5580 ,0x04);
+                wrSensorReg16_8(0x558a ,0x08);
+            break;	
+        }
 //#endif	
-			
+            
 }
 
 
 void ArduCAM::OV5642_set_Contrast(uint8_t Contrast)
 {
 //#if defined(OV5642_CAM) || defined(OV5642_CAM_BIT_ROTATION_FIXED)|| defined(OV5642_MINI_5MP) || defined (OV5642_MINI_5MP_PLUS)	
-		switch(Contrast)
-		{
-			case Contrast4:
-			wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x04);
-				wrSensorReg16_8(0x5587 ,0x30);
-				wrSensorReg16_8(0x5588 ,0x30);
-				wrSensorReg16_8(0x558a ,0x00);
-			break;
-			case Contrast3:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x04);
-				wrSensorReg16_8(0x5587 ,0x2c);
-				wrSensorReg16_8(0x5588 ,0x2c);
-				wrSensorReg16_8(0x558a ,0x00);
-			break;
-			case Contrast2:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x04);
-				wrSensorReg16_8(0x5587 ,0x28);
-				wrSensorReg16_8(0x5588 ,0x28);
-				wrSensorReg16_8(0x558a ,0x00);
-			break;
-			case Contrast1:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x04);
-				wrSensorReg16_8(0x5587 ,0x24);
-				wrSensorReg16_8(0x5588 ,0x24);
-				wrSensorReg16_8(0x558a ,0x00);
-			break;
-			case Contrast0:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x04);
-				wrSensorReg16_8(0x5587 ,0x20);
-				wrSensorReg16_8(0x5588 ,0x20);
-				wrSensorReg16_8(0x558a ,0x00);
-			break;
-			case Contrast_1:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x04);
-				wrSensorReg16_8(0x5587 ,0x1C);
-				wrSensorReg16_8(0x5588 ,0x1C);
-				wrSensorReg16_8(0x558a ,0x1C);
-			break;
-			case Contrast_2:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x04);
-				wrSensorReg16_8(0x5587 ,0x18);
-				wrSensorReg16_8(0x5588 ,0x18);
-				wrSensorReg16_8(0x558a ,0x00);
-			break;
-			case Contrast_3:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x04);
-				wrSensorReg16_8(0x5587 ,0x14);
-				wrSensorReg16_8(0x5588 ,0x14);
-				wrSensorReg16_8(0x558a ,0x00);
-			break;
-			case Contrast_4:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x04);
-				wrSensorReg16_8(0x5587 ,0x10);
-				wrSensorReg16_8(0x5588 ,0x10);
-				wrSensorReg16_8(0x558a ,0x00);
-			break;
-		}
+        switch(Contrast)
+        {
+            case Contrast4:
+            wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x04);
+                wrSensorReg16_8(0x5587 ,0x30);
+                wrSensorReg16_8(0x5588 ,0x30);
+                wrSensorReg16_8(0x558a ,0x00);
+            break;
+            case Contrast3:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x04);
+                wrSensorReg16_8(0x5587 ,0x2c);
+                wrSensorReg16_8(0x5588 ,0x2c);
+                wrSensorReg16_8(0x558a ,0x00);
+            break;
+            case Contrast2:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x04);
+                wrSensorReg16_8(0x5587 ,0x28);
+                wrSensorReg16_8(0x5588 ,0x28);
+                wrSensorReg16_8(0x558a ,0x00);
+            break;
+            case Contrast1:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x04);
+                wrSensorReg16_8(0x5587 ,0x24);
+                wrSensorReg16_8(0x5588 ,0x24);
+                wrSensorReg16_8(0x558a ,0x00);
+            break;
+            case Contrast0:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x04);
+                wrSensorReg16_8(0x5587 ,0x20);
+                wrSensorReg16_8(0x5588 ,0x20);
+                wrSensorReg16_8(0x558a ,0x00);
+            break;
+            case Contrast_1:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x04);
+                wrSensorReg16_8(0x5587 ,0x1C);
+                wrSensorReg16_8(0x5588 ,0x1C);
+                wrSensorReg16_8(0x558a ,0x1C);
+            break;
+            case Contrast_2:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x04);
+                wrSensorReg16_8(0x5587 ,0x18);
+                wrSensorReg16_8(0x5588 ,0x18);
+                wrSensorReg16_8(0x558a ,0x00);
+            break;
+            case Contrast_3:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x04);
+                wrSensorReg16_8(0x5587 ,0x14);
+                wrSensorReg16_8(0x5588 ,0x14);
+                wrSensorReg16_8(0x558a ,0x00);
+            break;
+            case Contrast_4:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x04);
+                wrSensorReg16_8(0x5587 ,0x10);
+                wrSensorReg16_8(0x5588 ,0x10);
+                wrSensorReg16_8(0x558a ,0x00);
+            break;
+        }
 //#endif		
 }
 
@@ -993,143 +1062,143 @@ void ArduCAM::OV5642_set_Contrast(uint8_t Contrast)
 void ArduCAM::OV5642_set_hue(uint8_t degree)
 {
 //	#if defined(OV5642_CAM) || defined(OV5642_CAM_BIT_ROTATION_FIXED)|| defined(OV5642_MINI_5MP) || defined (OV5642_MINI_5MP_PLUS)	
-		switch(degree)
-		{
-			case degree_180:
-			wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x01);
-				wrSensorReg16_8(0x5581 ,0x80);
-				wrSensorReg16_8(0x5582 ,0x00);
-				wrSensorReg16_8(0x558a ,0x32);
-			break;
-			case degree_150:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x01);
-				wrSensorReg16_8(0x5581 ,0x6f);
-				wrSensorReg16_8(0x5582 ,0x40);
-				wrSensorReg16_8(0x558a ,0x32);
-			break;
-			case degree_120:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x01);
-				wrSensorReg16_8(0x5581 ,0x40);
-				wrSensorReg16_8(0x5582 ,0x6f);
-				wrSensorReg16_8(0x558a ,0x32);
-			break;
-			case degree_90:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x01);
-				wrSensorReg16_8(0x5581 ,0x00);
-				wrSensorReg16_8(0x5582 ,0x80);
-				wrSensorReg16_8(0x558a ,0x02);
-			break;
-			case degree_60:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x01);
-				wrSensorReg16_8(0x5581 ,0x40);
-				wrSensorReg16_8(0x5582 ,0x6f);
-				wrSensorReg16_8(0x558a ,0x02);
-			break;
-			case degree_30:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x01);
-				wrSensorReg16_8(0x5581 ,0x6f);
-				wrSensorReg16_8(0x5582 ,0x40);
-				wrSensorReg16_8(0x558a ,0x02);
-			break;
-			case degree_0:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x01);
-				wrSensorReg16_8(0x5581 ,0x80);
-				wrSensorReg16_8(0x5582 ,0x00);
-				wrSensorReg16_8(0x558a ,0x01);
-			break;
-			case degree30:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x01);
-				wrSensorReg16_8(0x5581 ,0x6f);
-				wrSensorReg16_8(0x5582 ,0x40);
-				wrSensorReg16_8(0x558a ,0x01);
-			break;
-			case degree60:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x01);
-				wrSensorReg16_8(0x5581 ,0x40);
-				wrSensorReg16_8(0x5582 ,0x6f);
-				wrSensorReg16_8(0x558a ,0x01);
-			break;
-			case degree90:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x01);
-				wrSensorReg16_8(0x5581 ,0x00);
-				wrSensorReg16_8(0x5582 ,0x80);
-				wrSensorReg16_8(0x558a ,0x31);
-			break;
-			case degree120:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x01);
-				wrSensorReg16_8(0x5581 ,0x40);
-				wrSensorReg16_8(0x5582 ,0x6f);
-				wrSensorReg16_8(0x558a ,0x31);
-			break;
-			case degree150:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x01);
-				wrSensorReg16_8(0x5581 ,0x6f);
-				wrSensorReg16_8(0x5582 ,0x40);
-				wrSensorReg16_8(0x558a ,0x31);
-			break;
-		}
+        switch(degree)
+        {
+            case degree_180:
+            wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x01);
+                wrSensorReg16_8(0x5581 ,0x80);
+                wrSensorReg16_8(0x5582 ,0x00);
+                wrSensorReg16_8(0x558a ,0x32);
+            break;
+            case degree_150:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x01);
+                wrSensorReg16_8(0x5581 ,0x6f);
+                wrSensorReg16_8(0x5582 ,0x40);
+                wrSensorReg16_8(0x558a ,0x32);
+            break;
+            case degree_120:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x01);
+                wrSensorReg16_8(0x5581 ,0x40);
+                wrSensorReg16_8(0x5582 ,0x6f);
+                wrSensorReg16_8(0x558a ,0x32);
+            break;
+            case degree_90:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x01);
+                wrSensorReg16_8(0x5581 ,0x00);
+                wrSensorReg16_8(0x5582 ,0x80);
+                wrSensorReg16_8(0x558a ,0x02);
+            break;
+            case degree_60:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x01);
+                wrSensorReg16_8(0x5581 ,0x40);
+                wrSensorReg16_8(0x5582 ,0x6f);
+                wrSensorReg16_8(0x558a ,0x02);
+            break;
+            case degree_30:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x01);
+                wrSensorReg16_8(0x5581 ,0x6f);
+                wrSensorReg16_8(0x5582 ,0x40);
+                wrSensorReg16_8(0x558a ,0x02);
+            break;
+            case degree_0:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x01);
+                wrSensorReg16_8(0x5581 ,0x80);
+                wrSensorReg16_8(0x5582 ,0x00);
+                wrSensorReg16_8(0x558a ,0x01);
+            break;
+            case degree30:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x01);
+                wrSensorReg16_8(0x5581 ,0x6f);
+                wrSensorReg16_8(0x5582 ,0x40);
+                wrSensorReg16_8(0x558a ,0x01);
+            break;
+            case degree60:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x01);
+                wrSensorReg16_8(0x5581 ,0x40);
+                wrSensorReg16_8(0x5582 ,0x6f);
+                wrSensorReg16_8(0x558a ,0x01);
+            break;
+            case degree90:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x01);
+                wrSensorReg16_8(0x5581 ,0x00);
+                wrSensorReg16_8(0x5582 ,0x80);
+                wrSensorReg16_8(0x558a ,0x31);
+            break;
+            case degree120:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x01);
+                wrSensorReg16_8(0x5581 ,0x40);
+                wrSensorReg16_8(0x5582 ,0x6f);
+                wrSensorReg16_8(0x558a ,0x31);
+            break;
+            case degree150:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x01);
+                wrSensorReg16_8(0x5581 ,0x6f);
+                wrSensorReg16_8(0x5582 ,0x40);
+                wrSensorReg16_8(0x558a ,0x31);
+            break;
+        }
 //#endif	
-		
+        
 }
 
 
 void ArduCAM::OV5642_set_Special_effects(uint8_t Special_effect)
 {
 //	#if defined(OV5642_CAM) || defined(OV5642_CAM_BIT_ROTATION_FIXED)|| defined(OV5642_MINI_5MP) || defined (OV5642_MINI_5MP_PLUS)	
-		switch(Special_effect)
-		{
-			case Bluish:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x18);
-				wrSensorReg16_8(0x5585 ,0xa0);
-				wrSensorReg16_8(0x5586 ,0x40);
-			break;
-			case Greenish:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x18);
-				wrSensorReg16_8(0x5585 ,0x60);
-				wrSensorReg16_8(0x5586 ,0x60);
-			break;
-			case Reddish:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x18);
-				wrSensorReg16_8(0x5585 ,0x80);
-				wrSensorReg16_8(0x5586 ,0xc0);
-			break;
-			case BW:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x18);
-				wrSensorReg16_8(0x5585 ,0x80);
-				wrSensorReg16_8(0x5586 ,0x80);
-			break;
-			case Negative:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x40);
-			break;
-			
-				case Sepia:
-				wrSensorReg16_8(0x5001 ,0xff);
-				wrSensorReg16_8(0x5580 ,0x18);
-				wrSensorReg16_8(0x5585 ,0x40);
-				wrSensorReg16_8(0x5586 ,0xa0);
-			break;
-			case Normal:
-				wrSensorReg16_8(0x5001 ,0x7f);
-				wrSensorReg16_8(0x5580 ,0x00);		
-			break;		
-		}
+        switch(Special_effect)
+        {
+            case Bluish:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x18);
+                wrSensorReg16_8(0x5585 ,0xa0);
+                wrSensorReg16_8(0x5586 ,0x40);
+            break;
+            case Greenish:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x18);
+                wrSensorReg16_8(0x5585 ,0x60);
+                wrSensorReg16_8(0x5586 ,0x60);
+            break;
+            case Reddish:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x18);
+                wrSensorReg16_8(0x5585 ,0x80);
+                wrSensorReg16_8(0x5586 ,0xc0);
+            break;
+            case BW:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x18);
+                wrSensorReg16_8(0x5585 ,0x80);
+                wrSensorReg16_8(0x5586 ,0x80);
+            break;
+            case Negative:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x40);
+            break;
+            
+                case Sepia:
+                wrSensorReg16_8(0x5001 ,0xff);
+                wrSensorReg16_8(0x5580 ,0x18);
+                wrSensorReg16_8(0x5585 ,0x40);
+                wrSensorReg16_8(0x5586 ,0xa0);
+            break;
+            case Normal:
+                wrSensorReg16_8(0x5001 ,0x7f);
+                wrSensorReg16_8(0x5580 ,0x00);		
+            break;		
+        }
 //	#endif
 }
 
@@ -1137,97 +1206,97 @@ void ArduCAM::OV5642_set_Special_effects(uint8_t Special_effect)
 void ArduCAM::OV5642_set_Exposure_level(uint8_t level)
 {
 //	#if defined(OV5642_CAM) || defined(OV5642_CAM_BIT_ROTATION_FIXED)|| defined(OV5642_MINI_5MP) || defined (OV5642_MINI_5MP_PLUS)	
-		switch(level)
-		{
-			case Exposure_17_EV:
-			  wrSensorReg16_8(0x3a0f ,0x10);
-				wrSensorReg16_8(0x3a10 ,0x08);
-				wrSensorReg16_8(0x3a1b ,0x10);
-				wrSensorReg16_8(0x3a1e ,0x08);
-				wrSensorReg16_8(0x3a11 ,0x20);
-				wrSensorReg16_8(0x3a1f ,0x10);
-			break;
-			case Exposure_13_EV:
-				wrSensorReg16_8(0x3a0f ,0x18);
-				wrSensorReg16_8(0x3a10 ,0x10);
-				wrSensorReg16_8(0x3a1b ,0x18);
-				wrSensorReg16_8(0x3a1e ,0x10);
-				wrSensorReg16_8(0x3a11 ,0x30);
-				wrSensorReg16_8(0x3a1f ,0x10);
-			break;
-			case Exposure_10_EV:
-				wrSensorReg16_8(0x3a0f ,0x20);
-				wrSensorReg16_8(0x3a10 ,0x18);
-				wrSensorReg16_8(0x3a11 ,0x41);
-				wrSensorReg16_8(0x3a1b ,0x20);
-				wrSensorReg16_8(0x3a1e ,0x18);
-				wrSensorReg16_8(0x3a1f ,0x10);
-			break;
-			case Exposure_07_EV:
-				wrSensorReg16_8(0x3a0f ,0x28);
-				wrSensorReg16_8(0x3a10 ,0x20);
-				wrSensorReg16_8(0x3a11 ,0x51);
-				wrSensorReg16_8(0x3a1b ,0x28);
-				wrSensorReg16_8(0x3a1e ,0x20);
-				wrSensorReg16_8(0x3a1f ,0x10);
-			break;
-			case Exposure_03_EV:
-				wrSensorReg16_8(0x3a0f ,0x30);
-				wrSensorReg16_8(0x3a10 ,0x28);
-				wrSensorReg16_8(0x3a11 ,0x61);
-				wrSensorReg16_8(0x3a1b ,0x30);
-				wrSensorReg16_8(0x3a1e ,0x28);
-				wrSensorReg16_8(0x3a1f ,0x10);
-			break;
-			case Exposure_default:
-				wrSensorReg16_8(0x3a0f ,0x38);
-				wrSensorReg16_8(0x3a10 ,0x30);
-				wrSensorReg16_8(0x3a11 ,0x61);
-				wrSensorReg16_8(0x3a1b ,0x38);
-				wrSensorReg16_8(0x3a1e ,0x30);
-				wrSensorReg16_8(0x3a1f ,0x10);
-			break;
-			case Exposure03_EV:
-				wrSensorReg16_8(0x3a0f ,0x40);
-				wrSensorReg16_8(0x3a10 ,0x38);
-				wrSensorReg16_8(0x3a11 ,0x71);
-				wrSensorReg16_8(0x3a1b ,0x40);
-				wrSensorReg16_8(0x3a1e ,0x38);
-				wrSensorReg16_8(0x3a1f ,0x10);
-			break;
-			case Exposure07_EV:
-				wrSensorReg16_8(0x3a0f ,0x48);
-				wrSensorReg16_8(0x3a10 ,0x40);
-				wrSensorReg16_8(0x3a11 ,0x80);
-				wrSensorReg16_8(0x3a1b ,0x48);
-				wrSensorReg16_8(0x3a1e ,0x40);
-				wrSensorReg16_8(0x3a1f ,0x20);
-			break;
-			case Exposure10_EV:
-				wrSensorReg16_8(0x3a0f ,0x50);
-				wrSensorReg16_8(0x3a10 ,0x48);
-				wrSensorReg16_8(0x3a11 ,0x90);
-				wrSensorReg16_8(0x3a1b ,0x50);
-				wrSensorReg16_8(0x3a1e ,0x48);
-				wrSensorReg16_8(0x3a1f ,0x20);
-			break;
-			case Exposure13_EV:
-				wrSensorReg16_8(0x3a0f ,0x58);
-				wrSensorReg16_8(0x3a10 ,0x50);
-				wrSensorReg16_8(0x3a11 ,0x91);
-				wrSensorReg16_8(0x3a1b ,0x58);
-				wrSensorReg16_8(0x3a1e ,0x50);
-				wrSensorReg16_8(0x3a1f ,0x20);
-			break;
-			case Exposure17_EV:
-				wrSensorReg16_8(0x3a0f ,0x60);
-				wrSensorReg16_8(0x3a10 ,0x58);
-				wrSensorReg16_8(0x3a11 ,0xa0);
-				wrSensorReg16_8(0x3a1b ,0x60);
-				wrSensorReg16_8(0x3a1e ,0x58);
-				wrSensorReg16_8(0x3a1f ,0x20);
-			break;
-		}
+        switch(level)
+        {
+            case Exposure_17_EV:
+              wrSensorReg16_8(0x3a0f ,0x10);
+                wrSensorReg16_8(0x3a10 ,0x08);
+                wrSensorReg16_8(0x3a1b ,0x10);
+                wrSensorReg16_8(0x3a1e ,0x08);
+                wrSensorReg16_8(0x3a11 ,0x20);
+                wrSensorReg16_8(0x3a1f ,0x10);
+            break;
+            case Exposure_13_EV:
+                wrSensorReg16_8(0x3a0f ,0x18);
+                wrSensorReg16_8(0x3a10 ,0x10);
+                wrSensorReg16_8(0x3a1b ,0x18);
+                wrSensorReg16_8(0x3a1e ,0x10);
+                wrSensorReg16_8(0x3a11 ,0x30);
+                wrSensorReg16_8(0x3a1f ,0x10);
+            break;
+            case Exposure_10_EV:
+                wrSensorReg16_8(0x3a0f ,0x20);
+                wrSensorReg16_8(0x3a10 ,0x18);
+                wrSensorReg16_8(0x3a11 ,0x41);
+                wrSensorReg16_8(0x3a1b ,0x20);
+                wrSensorReg16_8(0x3a1e ,0x18);
+                wrSensorReg16_8(0x3a1f ,0x10);
+            break;
+            case Exposure_07_EV:
+                wrSensorReg16_8(0x3a0f ,0x28);
+                wrSensorReg16_8(0x3a10 ,0x20);
+                wrSensorReg16_8(0x3a11 ,0x51);
+                wrSensorReg16_8(0x3a1b ,0x28);
+                wrSensorReg16_8(0x3a1e ,0x20);
+                wrSensorReg16_8(0x3a1f ,0x10);
+            break;
+            case Exposure_03_EV:
+                wrSensorReg16_8(0x3a0f ,0x30);
+                wrSensorReg16_8(0x3a10 ,0x28);
+                wrSensorReg16_8(0x3a11 ,0x61);
+                wrSensorReg16_8(0x3a1b ,0x30);
+                wrSensorReg16_8(0x3a1e ,0x28);
+                wrSensorReg16_8(0x3a1f ,0x10);
+            break;
+            case Exposure_default:
+                wrSensorReg16_8(0x3a0f ,0x38);
+                wrSensorReg16_8(0x3a10 ,0x30);
+                wrSensorReg16_8(0x3a11 ,0x61);
+                wrSensorReg16_8(0x3a1b ,0x38);
+                wrSensorReg16_8(0x3a1e ,0x30);
+                wrSensorReg16_8(0x3a1f ,0x10);
+            break;
+            case Exposure03_EV:
+                wrSensorReg16_8(0x3a0f ,0x40);
+                wrSensorReg16_8(0x3a10 ,0x38);
+                wrSensorReg16_8(0x3a11 ,0x71);
+                wrSensorReg16_8(0x3a1b ,0x40);
+                wrSensorReg16_8(0x3a1e ,0x38);
+                wrSensorReg16_8(0x3a1f ,0x10);
+            break;
+            case Exposure07_EV:
+                wrSensorReg16_8(0x3a0f ,0x48);
+                wrSensorReg16_8(0x3a10 ,0x40);
+                wrSensorReg16_8(0x3a11 ,0x80);
+                wrSensorReg16_8(0x3a1b ,0x48);
+                wrSensorReg16_8(0x3a1e ,0x40);
+                wrSensorReg16_8(0x3a1f ,0x20);
+            break;
+            case Exposure10_EV:
+                wrSensorReg16_8(0x3a0f ,0x50);
+                wrSensorReg16_8(0x3a10 ,0x48);
+                wrSensorReg16_8(0x3a11 ,0x90);
+                wrSensorReg16_8(0x3a1b ,0x50);
+                wrSensorReg16_8(0x3a1e ,0x48);
+                wrSensorReg16_8(0x3a1f ,0x20);
+            break;
+            case Exposure13_EV:
+                wrSensorReg16_8(0x3a0f ,0x58);
+                wrSensorReg16_8(0x3a10 ,0x50);
+                wrSensorReg16_8(0x3a11 ,0x91);
+                wrSensorReg16_8(0x3a1b ,0x58);
+                wrSensorReg16_8(0x3a1e ,0x50);
+                wrSensorReg16_8(0x3a1f ,0x20);
+            break;
+            case Exposure17_EV:
+                wrSensorReg16_8(0x3a0f ,0x60);
+                wrSensorReg16_8(0x3a10 ,0x58);
+                wrSensorReg16_8(0x3a11 ,0xa0);
+                wrSensorReg16_8(0x3a1b ,0x60);
+                wrSensorReg16_8(0x3a1e ,0x58);
+                wrSensorReg16_8(0x3a1f ,0x20);
+            break;
+        }
 //#endif	
 }
 
@@ -1235,57 +1304,57 @@ void ArduCAM::OV5642_set_Exposure_level(uint8_t level)
 void ArduCAM::OV5642_set_Sharpness(uint8_t Sharpness)
 {
 //	#if defined(OV5642_CAM) || defined(OV5642_CAM_BIT_ROTATION_FIXED)|| defined(OV5642_MINI_5MP) || defined (OV5642_MINI_5MP_PLUS)	
-		switch(Sharpness)
-		{
-			case Auto_Sharpness_default:
-			wrSensorReg16_8(0x530A ,0x00);
-				wrSensorReg16_8(0x530c ,0x0 );
-				wrSensorReg16_8(0x530d ,0xc );
-				wrSensorReg16_8(0x5312 ,0x40);
-			break;
-			case Auto_Sharpness1:
-				wrSensorReg16_8(0x530A ,0x00);
-				wrSensorReg16_8(0x530c ,0x4 );
-				wrSensorReg16_8(0x530d ,0x18);
-				wrSensorReg16_8(0x5312 ,0x20);
-			break;
-			case Auto_Sharpness2:
-				wrSensorReg16_8(0x530A ,0x00);
-				wrSensorReg16_8(0x530c ,0x8 );
-				wrSensorReg16_8(0x530d ,0x30);
-				wrSensorReg16_8(0x5312 ,0x10);
-			break;
-			case Manual_Sharpnessoff:
-				wrSensorReg16_8(0x530A ,0x08);
-				wrSensorReg16_8(0x531e ,0x00);
-				wrSensorReg16_8(0x531f ,0x00);
-			break;
-			case Manual_Sharpness1:
-				wrSensorReg16_8(0x530A ,0x08);
-				wrSensorReg16_8(0x531e ,0x04);
-				wrSensorReg16_8(0x531f ,0x04);
-			break;
-			case Manual_Sharpness2:
-				wrSensorReg16_8(0x530A ,0x08);
-				wrSensorReg16_8(0x531e ,0x08);
-				wrSensorReg16_8(0x531f ,0x08);
-			break;
-			case Manual_Sharpness3:
-				wrSensorReg16_8(0x530A ,0x08);
-				wrSensorReg16_8(0x531e ,0x0c);
-				wrSensorReg16_8(0x531f ,0x0c);
-			break;
-			case Manual_Sharpness4:
-				wrSensorReg16_8(0x530A ,0x08);
-				wrSensorReg16_8(0x531e ,0x0f);
-				wrSensorReg16_8(0x531f ,0x0f);
-			break;
-			case Manual_Sharpness5:
-				wrSensorReg16_8(0x530A ,0x08);
-				wrSensorReg16_8(0x531e ,0x1f);
-				wrSensorReg16_8(0x531f ,0x1f);
-			break;
-		}
+        switch(Sharpness)
+        {
+            case Auto_Sharpness_default:
+            wrSensorReg16_8(0x530A ,0x00);
+                wrSensorReg16_8(0x530c ,0x0 );
+                wrSensorReg16_8(0x530d ,0xc );
+                wrSensorReg16_8(0x5312 ,0x40);
+            break;
+            case Auto_Sharpness1:
+                wrSensorReg16_8(0x530A ,0x00);
+                wrSensorReg16_8(0x530c ,0x4 );
+                wrSensorReg16_8(0x530d ,0x18);
+                wrSensorReg16_8(0x5312 ,0x20);
+            break;
+            case Auto_Sharpness2:
+                wrSensorReg16_8(0x530A ,0x00);
+                wrSensorReg16_8(0x530c ,0x8 );
+                wrSensorReg16_8(0x530d ,0x30);
+                wrSensorReg16_8(0x5312 ,0x10);
+            break;
+            case Manual_Sharpnessoff:
+                wrSensorReg16_8(0x530A ,0x08);
+                wrSensorReg16_8(0x531e ,0x00);
+                wrSensorReg16_8(0x531f ,0x00);
+            break;
+            case Manual_Sharpness1:
+                wrSensorReg16_8(0x530A ,0x08);
+                wrSensorReg16_8(0x531e ,0x04);
+                wrSensorReg16_8(0x531f ,0x04);
+            break;
+            case Manual_Sharpness2:
+                wrSensorReg16_8(0x530A ,0x08);
+                wrSensorReg16_8(0x531e ,0x08);
+                wrSensorReg16_8(0x531f ,0x08);
+            break;
+            case Manual_Sharpness3:
+                wrSensorReg16_8(0x530A ,0x08);
+                wrSensorReg16_8(0x531e ,0x0c);
+                wrSensorReg16_8(0x531f ,0x0c);
+            break;
+            case Manual_Sharpness4:
+                wrSensorReg16_8(0x530A ,0x08);
+                wrSensorReg16_8(0x531e ,0x0f);
+                wrSensorReg16_8(0x531f ,0x0f);
+            break;
+            case Manual_Sharpness5:
+                wrSensorReg16_8(0x530A ,0x08);
+                wrSensorReg16_8(0x531e ,0x1f);
+                wrSensorReg16_8(0x531f ,0x1f);
+            break;
+        }
 //#endif
 }
 
@@ -1293,47 +1362,47 @@ void ArduCAM::OV5642_set_Sharpness(uint8_t Sharpness)
 void ArduCAM::OV5642_set_Mirror_Flip(uint8_t Mirror_Flip)
 {
 //	#if defined(OV5642_CAM) || defined(OV5642_CAM_BIT_ROTATION_FIXED)|| defined(OV5642_MINI_5MP) || defined (OV5642_MINI_5MP_PLUS)	
-			 uint8_t reg_val;
-	switch(Mirror_Flip)
-		{
-			case MIRROR:
-				rdSensorReg16_8(0x3818,&reg_val);
-				reg_val = reg_val|0x00;
-				reg_val = reg_val&0x9F;
-			wrSensorReg16_8(0x3818 ,reg_val);
-			rdSensorReg16_8(0x3621,&reg_val);
-				reg_val = reg_val|0x20;
-				wrSensorReg16_8(0x3621, reg_val );
-			
-			break;
-			case FLIP:
-				rdSensorReg16_8(0x3818,&reg_val);
-				reg_val = reg_val|0x20;
-				reg_val = reg_val&0xbF;
-			wrSensorReg16_8(0x3818 ,reg_val);
-			rdSensorReg16_8(0x3621,&reg_val);
-				reg_val = reg_val|0x20;
-				wrSensorReg16_8(0x3621, reg_val );
-			break;
-			case MIRROR_FLIP:
-			 rdSensorReg16_8(0x3818,&reg_val);
-				reg_val = reg_val|0x60;
-				reg_val = reg_val&0xFF;
-			wrSensorReg16_8(0x3818 ,reg_val);
-			rdSensorReg16_8(0x3621,&reg_val);
-				reg_val = reg_val&0xdf;
-				wrSensorReg16_8(0x3621, reg_val );
-			break;
-			case Normal:
-				  rdSensorReg16_8(0x3818,&reg_val);
-				reg_val = reg_val|0x40;
-				reg_val = reg_val&0xdF;
-			wrSensorReg16_8(0x3818 ,reg_val);
-			rdSensorReg16_8(0x3621,&reg_val);
-				reg_val = reg_val&0xdf;
-				wrSensorReg16_8(0x3621, reg_val );
-			break;
-		}
+             uint8_t reg_val;
+    switch(Mirror_Flip)
+        {
+            case MIRROR:
+                rdSensorReg16_8(0x3818,&reg_val);
+                reg_val = reg_val|0x00;
+                reg_val = reg_val&0x9F;
+            wrSensorReg16_8(0x3818 ,reg_val);
+            rdSensorReg16_8(0x3621,&reg_val);
+                reg_val = reg_val|0x20;
+                wrSensorReg16_8(0x3621, reg_val );
+            
+            break;
+            case FLIP:
+                rdSensorReg16_8(0x3818,&reg_val);
+                reg_val = reg_val|0x20;
+                reg_val = reg_val&0xbF;
+            wrSensorReg16_8(0x3818 ,reg_val);
+            rdSensorReg16_8(0x3621,&reg_val);
+                reg_val = reg_val|0x20;
+                wrSensorReg16_8(0x3621, reg_val );
+            break;
+            case MIRROR_FLIP:
+             rdSensorReg16_8(0x3818,&reg_val);
+                reg_val = reg_val|0x60;
+                reg_val = reg_val&0xFF;
+            wrSensorReg16_8(0x3818 ,reg_val);
+            rdSensorReg16_8(0x3621,&reg_val);
+                reg_val = reg_val&0xdf;
+                wrSensorReg16_8(0x3621, reg_val );
+            break;
+            case Normal:
+                  rdSensorReg16_8(0x3818,&reg_val);
+                reg_val = reg_val|0x40;
+                reg_val = reg_val&0xdF;
+            wrSensorReg16_8(0x3818 ,reg_val);
+            rdSensorReg16_8(0x3621,&reg_val);
+                reg_val = reg_val&0xdf;
+                wrSensorReg16_8(0x3621, reg_val );
+            break;
+        }
 //	#endif
 }
 
@@ -1341,18 +1410,18 @@ void ArduCAM::OV5642_set_Mirror_Flip(uint8_t Mirror_Flip)
 void ArduCAM::OV5642_set_Compress_quality(uint8_t quality)
 {
 //#if defined(OV5642_CAM) || defined(OV5642_CAM_BIT_ROTATION_FIXED)|| defined(OV5642_MINI_5MP) || defined (OV5642_MINI_5MP_PLUS)	
-	switch(quality)
-		{
-			case high_quality:
-				wrSensorReg16_8(0x4407, 0x02);
-				break;
-			case default_quality:
-				wrSensorReg16_8(0x4407, 0x04);
-				break;
-			case low_quality:
-				wrSensorReg16_8(0x4407, 0x08);
-				break;
-		}
+    switch(quality)
+        {
+            case high_quality:
+                wrSensorReg16_8(0x4407, 0x02);
+                break;
+            case default_quality:
+                wrSensorReg16_8(0x4407, 0x04);
+                break;
+            case low_quality:
+                wrSensorReg16_8(0x4407, 0x08);
+                break;
+        }
 //#endif
 }
 
@@ -1360,23 +1429,23 @@ void ArduCAM::OV5642_set_Compress_quality(uint8_t quality)
 void ArduCAM::OV5642_Test_Pattern(uint8_t Pattern)
 {
 //	#if defined(OV5642_CAM) || defined(OV5642_CAM_BIT_ROTATION_FIXED)|| defined(OV5642_MINI_5MP) || defined (OV5642_MINI_5MP_PLUS)	
-	  switch(Pattern)
-		{
-			case Color_bar:
-				wrSensorReg16_8(0x503d , 0x80);
-				wrSensorReg16_8(0x503e, 0x00);
-				break;
-			case Color_square:
-				wrSensorReg16_8(0x503d , 0x85);
-				wrSensorReg16_8(0x503e, 0x12);
-				break;
-			case BW_square:
-				wrSensorReg16_8(0x503d , 0x85);
-				wrSensorReg16_8(0x503e, 0x1a);
-				break;
-			case DLI:
-				wrSensorReg16_8(0x4741 , 0x4);
-				break;
-		}
+      switch(Pattern)
+        {
+            case Color_bar:
+                wrSensorReg16_8(0x503d , 0x80);
+                wrSensorReg16_8(0x503e, 0x00);
+                break;
+            case Color_square:
+                wrSensorReg16_8(0x503d , 0x85);
+                wrSensorReg16_8(0x503e, 0x12);
+                break;
+            case BW_square:
+                wrSensorReg16_8(0x503d , 0x85);
+                wrSensorReg16_8(0x503e, 0x1a);
+                break;
+            case DLI:
+                wrSensorReg16_8(0x4741 , 0x4);
+                break;
+        }
 //#endif
 }
