@@ -1,56 +1,56 @@
-# PICO_SPI_CAM Examples
-The example demonstrates how to use C or python language to drive the SPI Camera mini camera on the Pcio platform. 
-This demonstration is made for ArduCAM_Mini_2MP/5MP, and it needs to be used in conjunction with PC software.
+# PICO_SPI_CAM サンプル
+このサンプルでは、Pico プラットフォーム上で SPI カメラミニカメラを C 言語または Python で駆動する方法を示します。
+このデモは ArduCAM_Mini_2MP/5MP 用に作成されており、PC ソフトウェアと併用して使用する必要があります。
 
-# Download driver
+# ドライバのダウンロード
 ```bash
 git clone https://github.com/ArduCAM/PICO_SPI_CAM.git
 ```
 
-# Use C language to drive SPI Camera
-To configure the development environment, please refer to the official manual, the link is as follows.
+# C 言語を使用して SPI カメラを駆動する
+開発環境を構築するには、公式マニュアルを参照してください。リンクは以下のとおりです。
 ```bash
 https://www.raspberrypi.org/documentation/rp2040/getting-started/#getting-started-with-c
 ```
-- Compile
-Select the driver to be compiled, the default is Arducam_MINI_2MP_Plus_Videostreaing.
+- コンパイル
+コンパイルするドライバを選択してください。デフォルトは Arducam_MINI_2MP_Plus_Videostreaing です。
 ![EasyBehavior](https://github.com/UCTRONICS/pic/blob/master/pico/Spi%20Camera/1.png)
 ```bash
-cd  PICO_SPI_CAM/C
+cd PICO_SPI_CAM/C
 mkdir build
 cd build
 cmake ..
-make 
+make
 ```
-Copy PICO_SPI_CAM/C/build/Examples/Arducam_MINI_2MP_Plus_Videostreaing/Arducam_mini_2mp_plus_videostreaming.uf2 to pico to run the test.
-Open the PC software, configure the port number, baud rate, camera model, and click Capyure to see the image.
+PICO_SPI_CAM/C/build/Examples/Arducam_MINI_2MP_Plus_Videostreaing/Arducam_mini_2mp_plus_videostreaming.uf2 を Pico にコピーしてテストを実行します。
+PC ソフトウェアを開き、ポート番号、ボーレート、カメラモデルを設定し、「Capyure」をクリックすると画像が表示されます。
 ![EasyBehavior](https://github.com/UCTRONICS/pic/blob/master/pico/Spi%20Camera/2.png)
 
-# Use Python to drive SPI camera
-## Note: The development system is Windows. 
-To configure the development environment, please refer to the official manual, the link is as follows.
+# Python を使用して SPI カメラを駆動する
+## 注記: 開発システムは Windows です。
+開発環境を構築するには、公式マニュアルを参照してください。リンクは以下のとおりです。
 ```bash
 https://circuitpython.org/
 ```
-Development software download link.
+開発ソフトウェアのダウンロードリンクです。
 ```bash
 https://thonny.org/
 ```
 
-## Copy the file under PICO_SPI_CAM/Python/ path except boot.py to the Pico device.
+## PICO_SPI_CAM/Python/ 配下の boot.py を除くファイルを Pico デバイスにコピーします。
 ![EasyBehavior](https://github.com/UCTRONICS/pic/blob/master/pico/Spi%20Camera/3.png)
-## Open Thonny software, select environment and port number. 
+## Thonny ソフトウェアを開き、環境とポート番号を選択します。
 ![EasyBehavior](https://github.com/UCTRONICS/pic/blob/master/pico/Spi%20Camera/4.png)
 ![EasyBehavior](https://github.com/UCTRONICS/pic/blob/master/pico/Spi%20Camera/5.png)
 ![EasyBehavior](https://github.com/UCTRONICS/pic/blob/master/pico/Spi%20Camera/10.png)
 ![EasyBehavior](https://github.com/UCTRONICS/pic/blob/master/pico/Spi%20Camera/11.png)
-## Copy the boot.py from the PICO_SPI_CAM/Python/ path to the Pico device, restart the Pico, open the device manager, and use the new port number for USB communication
-![EasyBehavior](https://github.com/UCTRONICS/pic/blob/master/pico/Spi%20Camera/12.png)	
-![EasyBehavior](https://github.com/UCTRONICS/pic/blob/master/pico/Spi%20Camera/13.png)	
-## Open the camera driver. 
+## PICO_SPI_CAM/Python/ 配下の boot.py を Pico にコピーし、Pico を再起動してデバイスマネージャーを開き、USB 通信に新しいポート番号を使用します。
+![EasyBehavior](https://github.com/UCTRONICS/pic/blob/master/pico/Spi%20Camera/12.png)
+![EasyBehavior](https://github.com/UCTRONICS/pic/blob/master/pico/Spi%20Camera/13.png)
+## カメラドライバを開きます。
 ![EasyBehavior](https://github.com/UCTRONICS/pic/blob/master/pico/Spi%20Camera/6.png)
 ![EasyBehavior](https://github.com/UCTRONICS/pic/blob/master/pico/Spi%20Camera/7.png)
-## Click Run, it displays [48], CameraType is OV2640, and SPI interface OK means that the camera is initialized. 
+## 「Run」をクリックすると [48] が表示され、CameraType が OV2640、SPI interface OK であることが表示され、カメラが初期化されたことを意味します。
 ![EasyBehavior](https://github.com/UCTRONICS/pic/blob/master/pico/Spi%20Camera/8.png)
-## Open hostapp.exe in the HostApp file,Select the port number for USB communication and click Image. 
+## HostApp フォルダ内の hostapp.exe を開き、USB 通信に使用するポート番号を選択して「Image」をクリックします。
 ![EasyBehavior](https://github.com/UCTRONICS/pic/blob/master/pico/Spi%20Camera/9.png)
